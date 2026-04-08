@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FolderOpen, FileDown } from 'lucide-react';
+import { FolderOpen, FileDown, Palette } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useProjectsList } from '../hooks/useProjectsList.js';
 import { useProjectData } from '../hooks/useProjectData.js';
 import { useTabs } from '../hooks/useTabs.js';
@@ -13,9 +14,11 @@ import {
 } from '../utils/treeOps.js';
 import { computeMetrics } from '../utils/metrics.js';
 import { exportProjectAsMarkdown } from '../utils/markdownExport.js';
-import { MAX_DEPTH } from '../constants/theme.js';
+import { genColumnKey } from '../utils/projectFactory.js';
+import { getNextColumnColor } from '../constants/themes.js';
 
 import Column from '../components/editor/Column.jsx';
+import AddColumnCard from '../components/editor/AddColumnCard.jsx';
 import TabBar from '../components/editor/TabBar.jsx';
 import ClipboardBanner from '../components/editor/ClipboardBanner.jsx';
 import DeleteModal from '../components/editor/DeleteModal.jsx';
@@ -23,21 +26,28 @@ import NewProjectDialog from '../components/editor/NewProjectDialog.jsx';
 import ProjectsListModal from '../components/editor/ProjectsListModal.jsx';
 import DashboardBar from '../components/dashboard/DashboardBar.jsx';
 import DashboardSettings from '../components/dashboard/DashboardSettings.jsx';
+import AppearanceSettings from '../components/common/AppearanceSettings.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
+
+const MAX_DEPTH = 3;
+const MAX_COLUMNS = 8;
+const MIN_COLUMNS = 1;
 
 export default function EditorScreen() {
   const { user, logout } = useAuth();
+  const { theme, t, themeId } = useTheme();
   const { projects, loading: projectsLoading, createNew, remove, rename } = useProjectsList();
   const { openIds, activeId, loaded: tabsLoaded, openTab, closeTab, switchTab } = useTabs(projects);
   const { project, loading: projLoading, saveStatus, updateLocal } = useProjectData(activeId);
   const { clipboard, copy, clear: clearClipboard } = useClipboard();
   const { settings: dashSettings, setSettings: setDashSettings } = useDashboardSettings();
 
-  const [expanded, setExpanded] = useState(new Set()); // node ids
+  const [expanded, setExpanded] = useState(new Set());
   const [pendingDelete, setPendingDelete] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [showProjectsList, setShowProjectsList] = useState(false);
   const [showDashSettings, setShowDashSettings] = useState(false);
+  const [showAppearance, setShowAppearance] = useState(false);
 
   // Auto-open first project on first load
   useEffect(() => {
@@ -47,7 +57,7 @@ export default function EditorScreen() {
     }
   }, [tabsLoaded, projectsLoading, openIds.length, projects, activeId, openTab]);
 
-  // Auto-expand all nodes when a new project loads
+  // Auto-expand all nodes when switching project
   useEffect(() => {
     if (!project) return;
     const ids = new Set();
@@ -55,11 +65,12 @@ export default function EditorScreen() {
       collectAllIds(project.structure?.[c.key] || []).forEach(id => ids.add(id));
     }
     setExpanded(ids);
-  }, [activeId]); // re-run only when switching project
+    // eslint-disable-next-line
+  }, [activeId]);
 
   const metrics = useMemo(() => computeMetrics(project), [project]);
 
-  // ----- Node operations (all go through updateLocal which schedules save) -----
+  // ----- Node operations -----
   const handleUpdateNode = (colKey, id, field, value) => {
     updateLocal(p => ({
       ...p,
@@ -76,6 +87,7 @@ export default function EditorScreen() {
 
   const handleAddRoot = (colKey) => {
     const node = newEmptyNode();
+    if (themeId !== 'sand') node.name = 'new_item';
     updateLocal(p => ({
       ...p,
       structure: { ...p.structure, [colKey]: [...(p.structure[colKey] || []), node] }
@@ -85,6 +97,7 @@ export default function EditorScreen() {
 
   const handleAddChild = (colKey, parentId) => {
     const node = newEmptyNode();
+    if (themeId !== 'sand') node.name = 'new_item';
     updateLocal(p => ({
       ...p,
       structure: { ...p.structure, [colKey]: addChildInTree(p.structure[colKey] || [], parentId, node) }
@@ -114,6 +127,15 @@ export default function EditorScreen() {
       if (activeId === pendingDelete.id) {
         closeTab(pendingDelete.id);
       }
+    } else if (pendingDelete.type === 'column') {
+      const { colKey } = pendingDelete;
+      updateLocal(p => {
+        if (p.columns.length <= MIN_COLUMNS) return p;
+        const newColumns = p.columns.filter(c => c.key !== colKey);
+        const newStructure = { ...p.structure };
+        delete newStructure[colKey];
+        return { ...p, columns: newColumns, structure: newStructure };
+      });
     }
     setPendingDelete(null);
   };
@@ -166,7 +188,7 @@ export default function EditorScreen() {
     });
   };
 
-  // ----- Column edit -----
+  // ----- Column edit / add / delete -----
   const handleUpdateColumn = (colKey, updates) => {
     updateLocal(p => ({
       ...p,
@@ -174,12 +196,30 @@ export default function EditorScreen() {
     }));
   };
 
+  const handleAddColumn = () => {
+    if (!project) return;
+    if (project.columns.length >= MAX_COLUMNS) return;
+    const newKey = genColumnKey(project.columns.map(c => c.key));
+    const existingColors = project.columns.map(c => c.color);
+    const newColor = getNextColumnColor(themeId, existingColors);
+    const newLabel = t.columnDefaultName(project.columns.length + 1);
+    updateLocal(p => ({
+      ...p,
+      columns: [...p.columns, { key: newKey, label: newLabel, color: newColor }],
+      structure: { ...p.structure, [newKey]: [] }
+    }));
+  };
+
+  const handleRequestDeleteColumn = (colKey, name) => {
+    if (!project) return;
+    if (project.columns.length <= MIN_COLUMNS) return;
+    setPendingDelete({ type: 'column', colKey, name });
+  };
+
   // ----- Project CRUD -----
   const handleCreateProject = async (name) => {
     const proj = await createNew(name);
-    if (proj) {
-      openTab(proj.id);
-    }
+    if (proj) openTab(proj.id);
     setShowNewProject(false);
   };
 
@@ -199,15 +239,16 @@ export default function EditorScreen() {
 
   // ----- Render -----
   if (projectsLoading || !tabsLoaded) {
-    return <LoadingSpinner message="sandroad 불러오는 중..." />;
+    return <LoadingSpinner />;
   }
+
+  const monoCls = theme.fontMono ? 'font-mono-ui' : '';
 
   return (
     <div
-      className="min-h-screen bg-amber-50/30 font-sans"
+      className={`min-h-screen ${theme.bg}`}
       style={{ paddingBottom: dashSettings.position === 'bottom' ? '56px' : 0 }}
     >
-      {/* Dashboard Bar */}
       <DashboardBar
         metrics={metrics}
         saveStatus={saveStatus}
@@ -218,30 +259,37 @@ export default function EditorScreen() {
 
       <div className="max-w-[1600px] mx-auto p-3 sm:p-4">
         {/* Header */}
-        <div className="mb-3 flex items-center gap-2">
-          <div className="text-stone-900">
+        <div className="mb-3 flex items-center gap-2 flex-wrap">
+          <div className={`${theme.text} ${monoCls}`}>
             <span className="text-lg font-bold">sandroad</span>
-            <span className="ml-2 text-xs text-stone-500 hidden sm:inline">구조 기획 도구</span>
+            <span className={`ml-2 text-xs ${theme.textMuted} hidden sm:inline`}>{t.appTagline}</span>
           </div>
           <div className="flex-1" />
           <button
-            onClick={() => setShowProjectsList(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded-md hover:bg-stone-50"
+            onClick={() => setShowAppearance(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
+            title={t.appearance}
           >
-            <FolderOpen size={14} /> 도시 목록
+            <Palette size={14} />
+          </button>
+          <button
+            onClick={() => setShowProjectsList(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
+          >
+            <FolderOpen size={14} /> {t.projectList}
           </button>
           <button
             onClick={handleExport}
             disabled={!project}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-stone-800 rounded-md hover:bg-stone-900 disabled:opacity-40"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md disabled:opacity-40 ${monoCls} ${theme.buttonPrimary}`}
           >
-            <FileDown size={14} /> 내보내기
+            <FileDown size={14} /> {t.export}
           </button>
           <button
             onClick={logout}
-            className="px-2.5 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded-md hover:bg-stone-50"
+            className={`px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
           >
-            로그아웃
+            {t.logout}
           </button>
         </div>
 
@@ -261,11 +309,9 @@ export default function EditorScreen() {
         {/* Columns */}
         {!project ? (
           projLoading ? (
-            <div className="p-10 text-center text-stone-400 text-sm">도시 불러오는 중...</div>
+            <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>{t.loadingProject}</div>
           ) : (
-            <div className="p-10 text-center text-stone-400 text-sm">
-              도시를 선택하거나 새 도시를 만드세요
-            </div>
+            <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>{t.selectOrCreate}</div>
           )
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -276,6 +322,7 @@ export default function EditorScreen() {
                 items={project.structure[col.key] || []}
                 expanded={expanded}
                 onUpdateColumn={handleUpdateColumn}
+                onRequestDeleteColumn={handleRequestDeleteColumn}
                 onAddRoot={handleAddRoot}
                 onPasteToRoot={handlePasteToRoot}
                 hasClipboard={!!clipboard}
@@ -288,6 +335,9 @@ export default function EditorScreen() {
                 onRequestDelete={handleRequestDelete}
               />
             ))}
+            {project.columns.length < MAX_COLUMNS && (
+              <AddColumnCard onAdd={handleAddColumn} />
+            )}
           </div>
         )}
       </div>
@@ -318,6 +368,10 @@ export default function EditorScreen() {
         settings={dashSettings}
         setSettings={setDashSettings}
         onClose={() => setShowDashSettings(false)}
+      />
+      <AppearanceSettings
+        open={showAppearance}
+        onClose={() => setShowAppearance(false)}
       />
     </div>
   );

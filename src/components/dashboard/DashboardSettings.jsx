@@ -1,68 +1,59 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { WIDGET_COLOR_CLASSES } from './Widget.jsx';
+import { useTheme } from '../../contexts/ThemeContext.jsx';
+import { WIDGET_COLOR_KEYS } from './Widget.jsx';
 import { DEFAULT_DASH } from '../../hooks/useDashboardSettings.js';
 
-const WIDGET_LABELS = {
-  d1count: '1차',
-  avg12:   '1→2 평균',
-  avg23:   '2→3 평균',
-  missing: '연결 누락',
-  pending: '예정',
-  review:  '검토',
-  balance: '균형'
-};
+const WIDGET_KEYS = ['d1count', 'avg12', 'avg23', 'missing', 'pending', 'review', 'balance'];
 
 export default function DashboardSettings({ open, settings, setSettings, onClose }) {
+  const { theme, t } = useTheme();
   if (!open) return null;
+  const monoCls = theme.fontMono ? 'font-mono-ui' : '';
 
   return (
     <div
-      className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4"
+      className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl p-5 max-w-md w-full max-h-[85vh] overflow-y-auto"
+        className={`${theme.bgPanel} rounded-lg shadow-xl p-5 max-w-md w-full max-h-[85vh] overflow-y-auto border ${theme.border}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-stone-900">계기판 설정</h3>
-          <button onClick={onClose} className="text-stone-400 hover:text-stone-700">
+          <h3 className={`text-sm font-bold ${theme.text}`}>{t.metricsSettings}</h3>
+          <button onClick={onClose} className={`${theme.textDim} hover:${theme.text}`}>
             <X size={16} />
           </button>
         </div>
 
         {/* Style */}
         <div className="mb-4">
-          <label className="text-xs font-medium text-stone-700 block mb-1.5">스타일</label>
+          <label className={`text-xs font-medium ${theme.text} block mb-1.5`}>{t.style}</label>
           <div className="flex gap-1">
-            {['digital', 'analog'].map(s => (
+            {[['digital', t.styleDigital], ['analog', t.styleAnalog]].map(([s, label]) => (
               <button
                 key={s}
                 onClick={() => setSettings(prev => ({ ...prev, style: s }))}
-                className={`flex-1 px-3 py-1.5 text-xs rounded border ${
-                  settings.style === s
-                    ? 'bg-stone-800 text-white border-stone-800'
-                    : 'bg-white text-stone-700 border-stone-300'
+                className={`flex-1 px-3 py-1.5 text-xs rounded border ${monoCls} ${
+                  settings.style === s ? theme.buttonPrimary : theme.button
                 }`}
               >
-                {s === 'digital' ? '디지털 (숫자)' : '아날로그 (점)'}
+                {label}
               </button>
             ))}
           </div>
           {settings.style === 'analog' && (
             <div className="mt-2 flex gap-1">
-              {['precise', 'rounded'].map(m => (
+              {[['precise', t.modePrecise], ['rounded', t.modeRounded]].map(([m, label]) => (
                 <button
                   key={m}
                   onClick={() => setSettings(prev => ({ ...prev, analogMode: m }))}
-                  className={`flex-1 px-2 py-1 text-[11px] rounded border ${
-                    settings.analogMode === m
-                      ? 'bg-amber-600 text-white border-amber-600'
-                      : 'bg-white text-stone-600 border-stone-300'
+                  className={`flex-1 px-2 py-1 text-[11px] rounded border ${monoCls} ${
+                    settings.analogMode === m ? theme.accent : theme.button
                   }`}
                 >
-                  {m === 'precise' ? '정확 (2.4→2.4개)' : '반올림 (2.8→3개)'}
+                  {label}
                 </button>
               ))}
             </div>
@@ -71,16 +62,14 @@ export default function DashboardSettings({ open, settings, setSettings, onClose
 
         {/* Position */}
         <div className="mb-4">
-          <label className="text-xs font-medium text-stone-700 block mb-1.5">위치</label>
+          <label className={`text-xs font-medium ${theme.text} block mb-1.5`}>{t.position}</label>
           <div className="flex gap-1">
-            {[['top', '상단'], ['bottom', '하단'], ['floating', '플로팅']].map(([v, l]) => (
+            {[['top', t.posTop], ['bottom', t.posBottom], ['floating', t.posFloat]].map(([v, l]) => (
               <button
                 key={v}
                 onClick={() => setSettings(prev => ({ ...prev, position: v }))}
-                className={`flex-1 px-3 py-1.5 text-xs rounded border ${
-                  settings.position === v
-                    ? 'bg-stone-800 text-white border-stone-800'
-                    : 'bg-white text-stone-700 border-stone-300'
+                className={`flex-1 px-3 py-1.5 text-xs rounded border ${monoCls} ${
+                  settings.position === v ? theme.buttonPrimary : theme.button
                 }`}
               >
                 {l}
@@ -88,18 +77,18 @@ export default function DashboardSettings({ open, settings, setSettings, onClose
             ))}
           </div>
           {settings.position === 'floating' && (
-            <p className="mt-1 text-[10px] text-stone-500">계기판 영역을 드래그해서 위치 조정</p>
+            <p className={`mt-1 text-[10px] ${theme.textMuted}`}>{t.floatHint}</p>
           )}
         </div>
 
         {/* Widgets */}
         <div className="mb-2">
-          <label className="text-xs font-medium text-stone-700 block mb-1.5">위젯 표시 및 색상</label>
+          <label className={`text-xs font-medium ${theme.text} block mb-1.5`}>{t.widgetVisibility}</label>
           <div className="space-y-1">
-            {Object.entries(WIDGET_LABELS).map(([k, label]) => {
+            {WIDGET_KEYS.map(k => {
               const cfg = settings.widgets[k] || { enabled: true, color: 'stone' };
               return (
-                <div key={k} className="flex items-center gap-2 px-2 py-1.5 border border-stone-200 rounded">
+                <div key={k} className={`flex items-center gap-2 px-2 py-1.5 border ${theme.border} rounded`}>
                   <input
                     type="checkbox"
                     checked={cfg.enabled}
@@ -109,18 +98,16 @@ export default function DashboardSettings({ open, settings, setSettings, onClose
                     }))}
                     className="w-3.5 h-3.5"
                   />
-                  <span className="text-xs flex-1">{label}</span>
+                  <span className={`text-xs flex-1 ${monoCls}`}>{t.widgetLabels[k]}</span>
                   <select
                     value={cfg.color}
                     onChange={(e) => setSettings(prev => ({
                       ...prev,
                       widgets: { ...prev.widgets, [k]: { ...cfg, color: e.target.value } }
                     }))}
-                    className="text-[11px] border border-stone-300 rounded px-1 py-0.5"
+                    className={`text-[11px] border ${theme.border} rounded px-1 py-0.5 ${monoCls} ${theme.input}`}
                   >
-                    {Object.keys(WIDGET_COLOR_CLASSES).map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    {WIDGET_COLOR_KEYS.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
               );
@@ -131,9 +118,9 @@ export default function DashboardSettings({ open, settings, setSettings, onClose
         <div className="mt-4 flex justify-end">
           <button
             onClick={() => setSettings(DEFAULT_DASH)}
-            className="px-3 py-1.5 text-xs font-medium text-stone-600 hover:text-stone-900"
+            className={`px-3 py-1.5 text-xs font-medium ${theme.textMuted} hover:${theme.text}`}
           >
-            기본값으로
+            {t.resetDefault}
           </button>
         </div>
       </div>

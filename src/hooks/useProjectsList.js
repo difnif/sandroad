@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 import {
   subscribeProjectsList, createProject, deleteProject, renameProject
 } from '../firebase/projectsService.js';
 import { makeEmptyProject } from '../utils/projectFactory.js';
 
-// Hook for managing the list of projects (subscribes to Firestore)
 export function useProjectsList() {
   const { user } = useAuth();
+  const { themeId } = useTheme();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -23,7 +24,7 @@ export function useProjectsList() {
 
   const createNew = async (name) => {
     if (!user) return null;
-    const proj = makeEmptyProject(name);
+    const proj = makeEmptyProject(name, themeId);
     await createProject(user.uid, proj);
     return proj;
   };

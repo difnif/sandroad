@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
   const { loginWithEmail, loginWithGoogle } = useAuth();
+  const { theme, t } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -31,74 +33,76 @@ export default function LoginScreen() {
       await loginWithGoogle();
       navigate('/');
     } catch (err) {
-      setError('Google 로그인에 실패했습니다');
+      setError('Google 로그인에 실패했습니다 / Google login failed');
     } finally {
       setLoading(false);
     }
   };
 
+  const monoCls = theme.fontMono ? 'font-mono-ui' : '';
+
   return (
-    <div className="min-h-screen bg-amber-50/30 flex items-center justify-center p-4">
+    <div className={`min-h-screen ${theme.bg} flex items-center justify-center p-4`}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-stone-900">sandroad</h1>
-          <p className="text-xs text-stone-500 mt-1">구조 기획 도구</p>
+          <h1 className={`text-2xl font-bold ${theme.text} ${monoCls}`}>sandroad</h1>
+          <p className={`text-xs ${theme.textMuted} mt-1 ${monoCls}`}>{t.appTagline}</p>
         </div>
 
-        <div className="bg-white border border-stone-200 rounded-lg p-5">
-          <h2 className="text-sm font-bold text-stone-900 mb-4">로그인</h2>
+        <div className={`${theme.bgPanel} border ${theme.border} rounded-lg p-5`}>
+          <h2 className={`text-sm font-bold ${theme.text} mb-4 ${monoCls}`}>Login / 로그인</h2>
 
           <form onSubmit={handleEmailLogin} className="space-y-3">
             <div>
-              <label className="block text-xs font-medium text-stone-700 mb-1">이메일</label>
+              <label className={`block text-xs font-medium ${theme.text} mb-1 ${monoCls}`}>Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md focus:border-amber-500 focus:outline-none"
+                className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none ${monoCls} ${theme.input}`}
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-stone-700 mb-1">비밀번호</label>
+              <label className={`block text-xs font-medium ${theme.text} mb-1 ${monoCls}`}>Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md focus:border-amber-500 focus:outline-none"
+                className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none ${monoCls} ${theme.input}`}
               />
             </div>
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            {error && <p className="text-xs text-red-500">{error}</p>}
             <button
               type="submit"
               disabled={loading}
-              className="w-full px-3 py-2 text-sm font-medium text-white bg-stone-800 rounded-md hover:bg-stone-900 disabled:opacity-50"
+              className={`w-full px-3 py-2 text-sm font-medium rounded-md disabled:opacity-50 ${monoCls} ${theme.buttonPrimary}`}
             >
-              {loading ? '로그인 중...' : '로그인'}
+              {loading ? '...' : 'Login'}
             </button>
           </form>
 
           <div className="mt-4 flex items-center gap-2">
-            <div className="flex-1 h-px bg-stone-200" />
-            <span className="text-[10px] text-stone-400">또는</span>
-            <div className="flex-1 h-px bg-stone-200" />
+            <div className={`flex-1 h-px ${theme.border}`} style={{ borderTopWidth: 1 }} />
+            <span className={`text-[10px] ${theme.textDim}`}>or</span>
+            <div className={`flex-1 h-px ${theme.border}`} style={{ borderTopWidth: 1 }} />
           </div>
 
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="mt-3 w-full px-3 py-2 text-sm font-medium text-stone-700 bg-white border border-stone-300 rounded-md hover:bg-stone-50 disabled:opacity-50 flex items-center justify-center gap-2"
+            className={`mt-3 w-full px-3 py-2 text-sm font-medium border rounded-md disabled:opacity-50 flex items-center justify-center gap-2 ${monoCls} ${theme.button}`}
           >
             <GoogleIcon />
-            Google로 계속하기
+            Continue with Google
           </button>
         </div>
 
-        <p className="mt-4 text-center text-xs text-stone-500">
-          계정이 없나요?{' '}
-          <Link to="/signup" className="text-amber-700 hover:text-amber-900 font-medium">
-            회원가입
+        <p className={`mt-4 text-center text-xs ${theme.textMuted} ${monoCls}`}>
+          No account?{' '}
+          <Link to="/signup" className={`font-medium ${theme.accentText}`}>
+            Sign up
           </Link>
         </p>
       </div>
@@ -119,12 +123,12 @@ function GoogleIcon() {
 
 function mapFirebaseError(code) {
   const map = {
-    'auth/invalid-email': '이메일 형식이 올바르지 않습니다',
-    'auth/user-not-found': '등록되지 않은 이메일입니다',
-    'auth/wrong-password': '비밀번호가 올바르지 않습니다',
-    'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다',
-    'auth/too-many-requests': '너무 많은 시도. 잠시 후 다시 시도하세요',
-    'auth/network-request-failed': '네트워크 연결을 확인하세요'
+    'auth/invalid-email': 'Invalid email format',
+    'auth/user-not-found': 'No account with this email',
+    'auth/wrong-password': 'Wrong password',
+    'auth/invalid-credential': 'Wrong email or password',
+    'auth/too-many-requests': 'Too many attempts. Try later.',
+    'auth/network-request-failed': 'Network error'
   };
-  return map[code] || '로그인에 실패했습니다';
+  return map[code] || 'Login failed';
 }

@@ -8,4 +8,9 @@ html, body, #root {
 
 body {
   background-color: rgb(254 243 199 / 0.3);
+  margin: 0;
+}
+
+.font-mono-ui {
+  font-family: 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
 }

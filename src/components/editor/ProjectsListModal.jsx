@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Edit2, Trash2 } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext.jsx';
 
 export default function ProjectsListModal({
   open, projects, openIds, onClose, onOpen, onRename, onDelete, onNew
 }) {
+  const { theme, t } = useTheme();
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -16,33 +18,33 @@ export default function ProjectsListModal({
     setRenameValue('');
   };
 
+  const monoCls = theme.fontMono ? 'font-mono-ui' : '';
+
   return (
     <div
-      className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4"
+      className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl p-5 max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col"
+        className={`${theme.bgPanel} rounded-lg shadow-xl p-5 max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border ${theme.border}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-stone-900">도시 목록</h3>
+          <h3 className={`text-sm font-bold ${theme.text}`}>{t.projectList}</h3>
           <button
             onClick={onNew}
-            className="text-xs font-medium text-amber-700 hover:text-amber-900"
+            className={`text-xs font-medium ${theme.accentText}`}
           >
-            + 새 도시
+            {t.newProject}
           </button>
         </div>
         <div className="overflow-y-auto space-y-1">
           {projects.length === 0 ? (
-            <div className="text-xs text-stone-400 text-center py-6">
-              아직 도시가 없습니다
-            </div>
+            <div className={`text-xs ${theme.textDim} text-center py-6`}>{t.noProjects}</div>
           ) : projects.map(p => (
             <div
               key={p.id}
-              className="flex items-center gap-2 px-2 py-1.5 rounded border border-stone-200 hover:border-stone-400"
+              className={`flex items-center gap-2 px-2 py-1.5 rounded border ${theme.border} hover:${theme.borderStrong}`}
             >
               {renamingId === p.id ? (
                 <input
@@ -54,30 +56,30 @@ export default function ProjectsListModal({
                     if (e.key === 'Enter') handleRename(p.id);
                     if (e.key === 'Escape') { setRenamingId(null); setRenameValue(''); }
                   }}
-                  className="flex-1 px-2 py-0.5 text-sm border border-stone-300 rounded"
+                  className={`flex-1 px-2 py-0.5 text-sm border rounded ${monoCls} ${theme.input}`}
                 />
               ) : (
                 <button
                   onClick={() => onOpen(p.id)}
-                  className="flex-1 text-left text-sm text-stone-800 truncate hover:text-amber-700"
+                  className={`flex-1 text-left text-sm ${monoCls} ${theme.text} truncate hover:${theme.accentText}`}
                 >
                   {p.name}
                   {openIds.includes(p.id) && (
-                    <span className="text-[10px] text-amber-600 ml-1">열림</span>
+                    <span className={`text-[10px] ${theme.accentText} ml-1`}>{t.open}</span>
                   )}
                 </button>
               )}
               <button
                 onClick={() => { setRenamingId(p.id); setRenameValue(p.name); }}
-                className="p-1 text-stone-400 hover:text-stone-700"
-                title="이름 변경"
+                className={`p-1 ${theme.textDim} hover:${theme.text}`}
+                title="rename"
               >
                 <Edit2 size={12} />
               </button>
               <button
                 onClick={() => onDelete(p.id, p.name)}
-                className="p-1 text-stone-400 hover:text-red-600"
-                title="삭제"
+                className={`p-1 ${theme.textDim} hover:text-red-500`}
+                title={t.delete}
               >
                 <Trash2 size={12} />
               </button>
