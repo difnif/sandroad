@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FolderOpen, FileDown, Palette } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { FolderOpen, FileDown, Palette, Box } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useProjectsList } from '../hooks/useProjectsList.js';
@@ -34,6 +35,7 @@ const MAX_COLUMNS = 8;
 const MIN_COLUMNS = 1;
 
 export default function EditorScreen() {
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, t, themeId } = useTheme();
   const { projects, loading: projectsLoading, createNew, remove, rename } = useProjectsList();
@@ -49,7 +51,6 @@ export default function EditorScreen() {
   const [showDashSettings, setShowDashSettings] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
 
-  // Auto-open first project on first load
   useEffect(() => {
     if (!tabsLoaded || projectsLoading) return;
     if (openIds.length === 0 && projects.length > 0 && !activeId) {
@@ -57,7 +58,6 @@ export default function EditorScreen() {
     }
   }, [tabsLoaded, projectsLoading, openIds.length, projects, activeId, openTab]);
 
-  // Auto-expand all nodes when switching project
   useEffect(() => {
     if (!project) return;
     const ids = new Set();
@@ -70,7 +70,6 @@ export default function EditorScreen() {
 
   const metrics = useMemo(() => computeMetrics(project), [project]);
 
-  // ----- Node operations -----
   const handleUpdateNode = (colKey, id, field, value) => {
     updateLocal(p => ({
       ...p,
@@ -149,7 +148,6 @@ export default function EditorScreen() {
     });
   };
 
-  // ----- Clipboard -----
   const handleCopy = (colKey, id) => {
     if (!project) return;
     const node = findNodeInTree(project.structure[colKey] || [], id);
@@ -188,7 +186,6 @@ export default function EditorScreen() {
     });
   };
 
-  // ----- Column edit / add / delete -----
   const handleUpdateColumn = (colKey, updates) => {
     updateLocal(p => ({
       ...p,
@@ -216,7 +213,6 @@ export default function EditorScreen() {
     setPendingDelete({ type: 'column', colKey, name });
   };
 
-  // ----- Project CRUD -----
   const handleCreateProject = async (name) => {
     const proj = await createNew(name);
     if (proj) openTab(proj.id);
@@ -237,7 +233,6 @@ export default function EditorScreen() {
     exportProjectAsMarkdown(project, metrics);
   };
 
-  // ----- Render -----
   if (projectsLoading || !tabsLoaded) {
     return <LoadingSpinner />;
   }
@@ -266,6 +261,14 @@ export default function EditorScreen() {
           </div>
           <div className="flex-1" />
           <button
+            onClick={() => navigate('/graph')}
+            disabled={!project}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md disabled:opacity-40 ${monoCls} ${theme.button}`}
+            title="3D graph view"
+          >
+            <Box size={14} /> graph
+          </button>
+          <button
             onClick={() => setShowAppearance(true)}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
             title={t.appearance}
@@ -293,7 +296,6 @@ export default function EditorScreen() {
           </button>
         </div>
 
-        {/* Tabs */}
         <TabBar
           openIds={openIds}
           projectsList={projects}
@@ -303,10 +305,8 @@ export default function EditorScreen() {
           onNew={() => setShowNewProject(true)}
         />
 
-        {/* Clipboard banner */}
         <ClipboardBanner clipboard={clipboard} onClear={clearClipboard} />
 
-        {/* Columns */}
         {!project ? (
           projLoading ? (
             <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>{t.loadingProject}</div>
@@ -342,7 +342,6 @@ export default function EditorScreen() {
         )}
       </div>
 
-      {/* Modals */}
       <DeleteModal
         pendingDelete={pendingDelete}
         onConfirm={handleConfirmDelete}
