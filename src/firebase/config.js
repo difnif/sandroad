@@ -1,5 +1,11 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import {
+  initializeAuth,
+  GoogleAuthProvider,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  browserPopupRedirectResolver
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -12,6 +18,14 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// Use initializeAuth (instead of getAuth) so we can pin persistence explicitly.
+// Order matters: indexedDB first (survives more scenarios including some PWA/WebView
+// contexts where localStorage is isolated), then localStorage as fallback.
+export const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+  popupRedirectResolver: browserPopupRedirectResolver
+});
+
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
