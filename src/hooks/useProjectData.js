@@ -3,14 +3,17 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { subscribeProject, saveProject } from '../firebase/projectsService.js';
 import { normalizeNode } from '../utils/treeOps.js';
 
-// Subscribe to a single project's full data with debounced auto-save
+// How long after a local edit we ignore incoming remote snapshots.
+// This prevents the Firestore echo from overwriting in-flight user input.
+const LOCAL_EDIT_GRACE_MS = 2000;
+
 export function useProjectData(pid) {
   const { user } = useAuth();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved'
   const saveTimerRef = useRef(null);
-  const localEditRef = useRef(false); // suppress remote echo
+  const lastLocalEditRef = useRef(0);
 
   useEffect(() => {
     if (!user || !pid) {
@@ -24,19 +27,23 @@ export function useProjectData(pid) {
         setLoading(false);
         return;
       }
-      // Normalize structure (in case of schema changes)
+
+      // If the user typed recently, drop this snapshot entirely — it's almost
+      // certainly the echo of our own save, and accepting it would blow away
+      // whatever new characters have been typed since.
+      const sinceEdit = Date.now() - lastLocalEditRef.current;
+      if (sinceEdit < LOCAL_EDIT_GRACE_MS) {
+        setLoading(false);
+        return;
+      }
+
       const normalized = { ...data };
       if (normalized.columns && normalized.structure) {
         for (const c of normalized.columns) {
           normalized.structure[c.key] = (normalized.structure[c.key] || []).map(normalizeNode);
         }
       }
-      // If we just made a local edit, ignore the echo from Firestore
-      if (localEditRef.current) {
-        localEditRef.current = false;
-      } else {
-        setProject(normalized);
-      }
+      setProject(normalized);
       setLoading(false);
     });
     return () => {
@@ -45,18 +52,19 @@ export function useProjectData(pid) {
     };
   }, [user, pid]);
 
-  // Local update with debounced save to Firestore
   const updateLocal = useCallback((updater) => {
+    lastLocalEditRef.current = Date.now();
     setProject(prev => {
       if (!prev) return prev;
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      // Schedule save
       if (user) {
         setSaveStatus('saving');
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(async () => {
           try {
-            localEditRef.current = true;
+            // Refresh the edit timestamp right before writing so any echo
+            // triggered by this save is inside the grace window.
+            lastLocalEditRef.current = Date.now();
             await saveProject(user.uid, next);
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 1200);
