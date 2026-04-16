@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FolderOpen, FileDown, Palette, Box } from 'lucide-react';
+import {
+  DndContext, DragOverlay,
+  PointerSensor, TouchSensor, KeyboardSensor,
+  useSensor, useSensors, closestCenter, pointerWithin
+} from '@dnd-kit/core';
+import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
+
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useProjectsList } from '../hooks/useProjectsList.js';
@@ -11,12 +18,14 @@ import { useDashboardSettings } from '../hooks/useDashboardSettings.js';
 
 import {
   updateInTree, toggleTagInTree, addChildInTree, removeFromTree,
-  findNodeInTree, findDepthInTree, collectAllIds, cloneNodeWithNewIds, newEmptyNode
+  findNodeInTree, findDepthInTree, collectAllIds, cloneNodeWithNewIds, newEmptyNode,
+  outdentInTree, indentInTree, moveUpInTree, moveDownInTree,
+  findPath, getNodeAtPath, removeAtPath, insertAtPath, extractNodes
 } from '../utils/treeOps.js';
 import { computeMetrics } from '../utils/metrics.js';
 import { exportProjectAsMarkdown } from '../utils/markdownExport.js';
 import { genColumnKey } from '../utils/projectFactory.js';
-import { getNextColumnColor } from '../constants/themes.js';
+import { MAX_DEPTH, getNextColumnColor } from '../constants/theme.js';
 
 import Column from '../components/editor/Column.jsx';
 import AddColumnCard from '../components/editor/AddColumnCard.jsx';
@@ -30,9 +39,18 @@ import DashboardSettings from '../components/dashboard/DashboardSettings.jsx';
 import AppearanceSettings from '../components/common/AppearanceSettings.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 
-const MAX_DEPTH = 3;
 const MAX_COLUMNS = 8;
 const MIN_COLUMNS = 1;
+
+// Find which column a node belongs to within the project
+function findColumnForNode(project, nodeId) {
+  if (!project) return null;
+  for (const col of project.columns || []) {
+    const items = project.structure?.[col.key] || [];
+    if (findPath(items, nodeId)) return col.key;
+  }
+  return null;
+}
 
 export default function EditorScreen() {
   const navigate = useNavigate();
@@ -45,11 +63,19 @@ export default function EditorScreen() {
   const { settings: dashSettings, setSettings: setDashSettings } = useDashboardSettings();
 
   const [expanded, setExpanded] = useState(new Set());
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [pendingDelete, setPendingDelete] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [showProjectsList, setShowProjectsList] = useState(false);
   const [showDashSettings, setShowDashSettings] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
+  const [activeDragId, setActiveDragId] = useState(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   useEffect(() => {
     if (!tabsLoaded || projectsLoading) return;
@@ -65,25 +91,25 @@ export default function EditorScreen() {
       collectAllIds(project.structure?.[c.key] || []).forEach(id => ids.add(id));
     }
     setExpanded(ids);
+    setSelectedIds(new Set());
     // eslint-disable-next-line
   }, [activeId]);
 
   const metrics = useMemo(() => computeMetrics(project), [project]);
 
+  // ----- Node ops -----
   const handleUpdateNode = (colKey, id, field, value) => {
     updateLocal(p => ({
       ...p,
       structure: { ...p.structure, [colKey]: updateInTree(p.structure[colKey] || [], id, { [field]: value }) }
     }));
   };
-
   const handleToggleTag = (colKey, id, tagName) => {
     updateLocal(p => ({
       ...p,
       structure: { ...p.structure, [colKey]: toggleTagInTree(p.structure[colKey] || [], id, tagName) }
     }));
   };
-
   const handleAddRoot = (colKey) => {
     const node = newEmptyNode();
     if (themeId !== 'sand') node.name = 'new_item';
@@ -93,7 +119,6 @@ export default function EditorScreen() {
     }));
     setExpanded(prev => new Set(prev).add(node.id));
   };
-
   const handleAddChild = (colKey, parentId) => {
     const node = newEmptyNode();
     if (themeId !== 'sand') node.name = 'new_item';
@@ -108,11 +133,9 @@ export default function EditorScreen() {
       return next;
     });
   };
-
   const handleRequestDelete = (colKey, id, name) => {
     setPendingDelete({ type: 'node', colKey, id, name });
   };
-
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
     if (pendingDelete.type === 'node') {
@@ -123,9 +146,7 @@ export default function EditorScreen() {
       }));
     } else if (pendingDelete.type === 'project') {
       await remove(pendingDelete.id);
-      if (activeId === pendingDelete.id) {
-        closeTab(pendingDelete.id);
-      }
+      if (activeId === pendingDelete.id) closeTab(pendingDelete.id);
     } else if (pendingDelete.type === 'column') {
       const { colKey } = pendingDelete;
       updateLocal(p => {
@@ -138,23 +159,31 @@ export default function EditorScreen() {
     }
     setPendingDelete(null);
   };
-
   const handleToggleExpand = (nodeId) => {
     setExpanded(prev => {
       const next = new Set(prev);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
+      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
       return next;
     });
   };
 
+  // ----- Selection -----
+  const handleToggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // ----- Clipboard -----
   const handleCopy = (colKey, id) => {
     if (!project) return;
     const node = findNodeInTree(project.structure[colKey] || [], id);
     if (!node) return;
     copy(node, project.name);
   };
-
   const handlePasteToRoot = (colKey) => {
     if (!clipboard) return;
     const cloned = cloneNodeWithNewIds(clipboard.node);
@@ -168,7 +197,6 @@ export default function EditorScreen() {
       return next;
     });
   };
-
   const handlePasteAsChild = (colKey, parentId) => {
     if (!clipboard || !project) return;
     const parentDepth = findDepthInTree(project.structure[colKey] || [], parentId);
@@ -186,13 +214,39 @@ export default function EditorScreen() {
     });
   };
 
+  // ----- Indent/Outdent/MoveUp/MoveDown -----
+  const handleOutdent = (colKey, id) => {
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [colKey]: outdentInTree(p.structure[colKey] || [], id) }
+    }));
+  };
+  const handleIndent = (colKey, id) => {
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [colKey]: indentInTree(p.structure[colKey] || [], id, MAX_DEPTH) }
+    }));
+  };
+  const handleMoveUp = (colKey, id) => {
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [colKey]: moveUpInTree(p.structure[colKey] || [], id) }
+    }));
+  };
+  const handleMoveDown = (colKey, id) => {
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [colKey]: moveDownInTree(p.structure[colKey] || [], id) }
+    }));
+  };
+
+  // ----- Column -----
   const handleUpdateColumn = (colKey, updates) => {
     updateLocal(p => ({
       ...p,
       columns: p.columns.map(c => c.key === colKey ? { ...c, ...updates } : c)
     }));
   };
-
   const handleAddColumn = () => {
     if (!project) return;
     if (project.columns.length >= MAX_COLUMNS) return;
@@ -206,33 +260,132 @@ export default function EditorScreen() {
       structure: { ...p.structure, [newKey]: [] }
     }));
   };
-
   const handleRequestDeleteColumn = (colKey, name) => {
     if (!project) return;
     if (project.columns.length <= MIN_COLUMNS) return;
     setPendingDelete({ type: 'column', colKey, name });
   };
 
+  // ----- Project -----
   const handleCreateProject = async (name) => {
     const proj = await createNew(name);
     if (proj) openTab(proj.id);
     setShowNewProject(false);
   };
-
   const handleOpenProject = (pid) => {
     openTab(pid);
     setShowProjectsList(false);
   };
-
   const handleDeleteProject = (pid, name) => {
     setPendingDelete({ type: 'project', id: pid, name });
     setShowProjectsList(false);
   };
+  const handleExport = () => exportProjectAsMarkdown(project, metrics);
 
-  const handleExport = () => {
-    exportProjectAsMarkdown(project, metrics);
+  // ================================================================
+  // Drag and drop
+  // ================================================================
+  const handleDragStart = ({ active }) => {
+    setActiveDragId(active.id);
   };
 
+  const handleDragEnd = ({ active, over }) => {
+    setActiveDragId(null);
+    if (!over || !project) return;
+    const activeId = active.id;
+    if (activeId === over.id) return;
+
+    // Determine which nodes to move
+    const idsToMove = selectedIds.has(activeId) && selectedIds.size > 1
+      ? Array.from(selectedIds)
+      : [activeId];
+
+    // Determine destination
+    const overId = over.id;
+    let destColKey = null;
+    let destNodeId = null;
+
+    if (typeof overId === 'string' && overId.startsWith('col:')) {
+      destColKey = overId.slice(4);
+    } else {
+      destNodeId = overId;
+      destColKey = findColumnForNode(project, destNodeId);
+    }
+    if (!destColKey) return;
+
+    // Source column of the active node
+    const srcColKey = findColumnForNode(project, activeId);
+    if (!srcColKey) return;
+
+    updateLocal(p => {
+      // Gather subtrees being moved
+      // For multi-move we remove from each source column separately
+      const structure = { ...p.structure };
+      const collected = []; // [{node, sourceCol}]
+      const idsByCol = {};
+      for (const id of idsToMove) {
+        const col = findColumnForNode({ columns: p.columns, structure }, id);
+        if (!col) continue;
+        if (!idsByCol[col]) idsByCol[col] = [];
+        idsByCol[col].push(id);
+      }
+      for (const col of Object.keys(idsByCol)) {
+        const { tree, collected: gathered } = extractNodes(structure[col] || [], idsByCol[col]);
+        structure[col] = tree;
+        for (const node of gathered) collected.push(node);
+      }
+
+      // Insert at destination
+      const destTree = structure[destColKey] || [];
+      let newDestTree;
+      if (destNodeId) {
+        // Try to insert as a sibling BEFORE destNodeId (or at root if target removed by extraction)
+        const path = findPath(destTree, destNodeId);
+        if (path) {
+          // Insert collected one-by-one at path position, then shift for next ones
+          let tree = destTree;
+          let insertPath = path;
+          for (const n of collected) {
+            tree = insertAtPath(tree, insertPath, n);
+            // Advance insertPath by 1 at the same level so next insertion comes right after
+            insertPath = [...insertPath.slice(0, -1), insertPath[insertPath.length - 1] + 1];
+          }
+          newDestTree = tree;
+        } else {
+          // Target was removed (e.g. target was inside a moved subtree) — fall back to appending
+          newDestTree = [...destTree, ...collected];
+        }
+      } else {
+        // Dropped on empty column area
+        newDestTree = [...destTree, ...collected];
+      }
+      structure[destColKey] = newDestTree;
+
+      return { ...p, structure };
+    });
+
+    // Expand the moved subtrees so user can see them
+    setExpanded(prev => {
+      const next = new Set(prev);
+      for (const id of idsToMove) {
+        next.add(id);
+      }
+      return next;
+    });
+    clearSelection();
+  };
+
+  // ----- Drag overlay preview (ghost) -----
+  const dragPreviewNode = useMemo(() => {
+    if (!activeDragId || !project) return null;
+    for (const col of project.columns) {
+      const n = findNodeInTree(project.structure[col.key] || [], activeDragId);
+      if (n) return { name: n.name, count: selectedIds.has(activeDragId) && selectedIds.size > 1 ? selectedIds.size : 1 };
+    }
+    return null;
+  }, [activeDragId, project, selectedIds]);
+
+  // ----- Render -----
   if (projectsLoading || !tabsLoaded) {
     return <LoadingSpinner />;
   }
@@ -260,6 +413,15 @@ export default function EditorScreen() {
             <span className={`ml-2 text-xs ${theme.textMuted} hidden sm:inline`}>{t.appTagline}</span>
           </div>
           <div className="flex-1" />
+          {selectedIds.size > 0 && (
+            <button
+              onClick={clearSelection}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
+              title="clear selection"
+            >
+              {selectedIds.size} selected · clear
+            </button>
+          )}
           <button
             onClick={() => navigate('/graph')}
             disabled={!project}
@@ -314,31 +476,60 @@ export default function EditorScreen() {
             <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>{t.selectOrCreate}</div>
           )
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {project.columns.map(col => (
-              <Column
-                key={col.key}
-                column={col}
-                items={project.structure[col.key] || []}
-                expanded={expanded}
-                onUpdateColumn={handleUpdateColumn}
-                onRequestDeleteColumn={handleRequestDeleteColumn}
-                onAddRoot={handleAddRoot}
-                onPasteToRoot={handlePasteToRoot}
-                hasClipboard={!!clipboard}
-                onToggleExpand={handleToggleExpand}
-                onUpdateNode={handleUpdateNode}
-                onToggleTag={handleToggleTag}
-                onAddChild={handleAddChild}
-                onCopy={handleCopy}
-                onPasteAsChild={handlePasteAsChild}
-                onRequestDelete={handleRequestDelete}
-              />
-            ))}
-            {project.columns.length < MAX_COLUMNS && (
-              <AddColumnCard onAdd={handleAddColumn} />
-            )}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {project.columns.map((col, colIdx) => (
+                <Column
+                  key={col.key}
+                  column={col}
+                  columnIndex={colIdx}
+                  items={project.structure[col.key] || []}
+                  expandedIds={expanded}
+                  selectedIds={selectedIds}
+                  onUpdateColumn={handleUpdateColumn}
+                  onRequestDeleteColumn={handleRequestDeleteColumn}
+                  onAddRoot={handleAddRoot}
+                  onPasteToRoot={handlePasteToRoot}
+                  hasClipboard={!!clipboard}
+                  onToggleExpand={handleToggleExpand}
+                  onUpdateNode={handleUpdateNode}
+                  onToggleTag={handleToggleTag}
+                  onAddChild={handleAddChild}
+                  onCopy={handleCopy}
+                  onPasteAsChild={handlePasteAsChild}
+                  onRequestDelete={handleRequestDelete}
+                  onToggleSelect={handleToggleSelect}
+                  onOutdent={handleOutdent}
+                  onIndent={handleIndent}
+                  onMoveUp={handleMoveUp}
+                  onMoveDown={handleMoveDown}
+                />
+              ))}
+              {project.columns.length < MAX_COLUMNS && (
+                <AddColumnCard onAdd={handleAddColumn} />
+              )}
+            </div>
+
+            <DragOverlay>
+              {dragPreviewNode ? (
+                <div className={`${theme.bgPanel} border ${theme.borderStrong} rounded shadow-lg px-3 py-2 ${monoCls}`}>
+                  <div className={`text-xs font-bold ${theme.text}`}>
+                    &gt; {dragPreviewNode.name}
+                  </div>
+                  {dragPreviewNode.count > 1 && (
+                    <div className={`text-[10px] ${theme.textMuted}`}>
+                      + {dragPreviewNode.count - 1} more
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         )}
       </div>
 
