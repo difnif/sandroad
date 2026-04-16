@@ -1,43 +1,59 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Clipboard, Edit2, X, Check } from 'lucide-react';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
 import TreeNode from './TreeNode.jsx';
 import { countNodes } from '../../utils/treeOps.js';
+import { flattenVisible } from '../../utils/treeFlatten.js';
+import { formatColumnNumber } from '../../utils/numbering.js';
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 
 export default function Column({
-  column, items,
-  expanded,
+  column, columnIndex, items, expandedIds,
+  selectedIds,
   onUpdateColumn, onRequestDeleteColumn,
   onAddRoot, onPasteToRoot, hasClipboard,
   onToggleExpand, onUpdateNode, onToggleTag, onAddChild,
-  onCopy, onPasteAsChild, onRequestDelete
+  onCopy, onPasteAsChild, onRequestDelete, onToggleSelect,
+  onOutdent, onIndent, onMoveUp, onMoveDown
 }) {
   const { theme, t, themeId } = useTheme();
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState(column.label);
 
-  // Resolve color: if not in this theme's palette, fall back to first color
   const palette = theme.columnColors;
   const resolvedColor = palette.includes(column.color) ? column.color : palette[0];
   const styles = theme.columnStyles[resolvedColor];
   const total = countNodes(items);
   const monoCls = theme.fontMono ? 'font-mono-ui' : '';
 
+  // Flatten tree for DnD
+  const flatItems = useMemo(
+    () => flattenVisible(items, expandedIds),
+    [items, expandedIds]
+  );
+
+  // Column-level droppable for empty area drops
+  const { setNodeRef: setDroppableRef, isOver: isOverColumn } = useDroppable({
+    id: `col:${column.key}`,
+    data: { type: 'column', colKey: column.key }
+  });
+
   const startEdit = () => {
     setLabelDraft(column.label);
     setEditingLabel(true);
   };
-
   const commitEdit = () => {
     const v = labelDraft.trim() || column.label;
     if (v !== column.label) onUpdateColumn(column.key, { label: v });
     setEditingLabel(false);
   };
-
   const cancelEdit = () => {
     setLabelDraft(column.label);
     setEditingLabel(false);
   };
+
+  const columnRoman = formatColumnNumber(columnIndex);
 
   return (
     <div className={`${theme.bgPanel} border ${theme.border} rounded-lg overflow-hidden flex flex-col`}>
@@ -46,6 +62,9 @@ export default function Column({
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <span className={`w-2 h-2 rounded-full ${styles.dot} flex-shrink-0`} />
+            <span className={`text-[11px] font-bold opacity-70 ${monoCls} flex-shrink-0`}>
+              {columnRoman}.
+            </span>
             {editingLabel ? (
               <>
                 <input
@@ -122,32 +141,42 @@ export default function Column({
         </div>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 min-h-[400px] max-h-[70vh] overflow-y-auto">
-        {items.length === 0 ? (
+      {/* Body (droppable) */}
+      <div
+        ref={setDroppableRef}
+        className={`flex-1 min-h-[400px] max-h-[70vh] overflow-y-auto ${isOverColumn ? 'bg-amber-50/30' : ''}`}
+      >
+        {flatItems.length === 0 ? (
           <div className={`p-6 text-center ${theme.textDim} text-xs ${monoCls}`}>
             {t.columnEmpty[0]}<br />{t.columnEmpty[1]}
           </div>
         ) : (
-          <div className="py-1">
-            {items.map(n => (
-              <TreeNode
-                key={n.id}
-                node={n}
-                depth={1}
-                colKey={column.key}
-                expanded={expanded}
-                onToggleExpand={onToggleExpand}
-                onUpdate={onUpdateNode}
-                onToggleTag={onToggleTag}
-                onAddChild={onAddChild}
-                onCopy={onCopy}
-                onPasteAsChild={onPasteAsChild}
-                onRequestDelete={onRequestDelete}
-                hasClipboard={hasClipboard}
-              />
-            ))}
-          </div>
+          <SortableContext items={flatItems.map(f => f.id)} strategy={verticalListSortingStrategy}>
+            <div className="py-1">
+              {flatItems.map(flat => (
+                <TreeNode
+                  key={flat.id}
+                  flatItem={flat}
+                  colKey={column.key}
+                  isSelected={selectedIds.has(flat.id)}
+                  expandedIds={expandedIds}
+                  hasClipboard={hasClipboard}
+                  onToggleExpand={onToggleExpand}
+                  onUpdate={onUpdateNode}
+                  onToggleTag={onToggleTag}
+                  onAddChild={onAddChild}
+                  onCopy={onCopy}
+                  onPasteAsChild={onPasteAsChild}
+                  onRequestDelete={onRequestDelete}
+                  onToggleSelect={onToggleSelect}
+                  onOutdent={onOutdent}
+                  onIndent={onIndent}
+                  onMoveUp={onMoveUp}
+                  onMoveDown={onMoveDown}
+                />
+              ))}
+            </div>
+          </SortableContext>
         )}
       </div>
     </div>
