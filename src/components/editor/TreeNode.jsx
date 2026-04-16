@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -10,7 +10,78 @@ import { MAX_DEPTH } from '../../constants/theme.js';
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 import { formatDepthNumber } from '../../utils/numbering.js';
 
-export default function TreeNode({
+// A text input that keeps its own local draft state so typing isn't
+// interrupted by parent re-renders, Firestore echoes, or IME composition.
+// The parent is updated on each change (for downstream save), but this
+// component's displayed value comes from local state so the cursor
+// never jumps back.
+function DraftInput({
+  value, onChange, onSubmit,
+  className, placeholder, type = 'text', rows, multiline
+}) {
+  const [draft, setDraft] = useState(value ?? '');
+  const composingRef = useRef(false);
+  const prevValueRef = useRef(value);
+
+  // When the parent value changes for a *different* reason than our local
+  // typing (e.g. another client edited, or project switched), sync the draft.
+  useEffect(() => {
+    if (value !== prevValueRef.current && value !== draft && !composingRef.current) {
+      setDraft(value ?? '');
+    }
+    prevValueRef.current = value;
+    // eslint-disable-next-line
+  }, [value]);
+
+  const commit = (v) => {
+    setDraft(v);
+    // During Korean IME composition, don't push to parent — wait for compositionend
+    if (composingRef.current) return;
+    onChange(v);
+  };
+
+  const handleCompositionStart = () => {
+    composingRef.current = true;
+  };
+  const handleCompositionEnd = (e) => {
+    composingRef.current = false;
+    const v = e.currentTarget.value;
+    setDraft(v);
+    onChange(v);
+  };
+
+  if (multiline) {
+    return (
+      <textarea
+        value={draft}
+        onChange={(e) => commit(e.target.value)}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        className={className}
+        placeholder={placeholder}
+        rows={rows}
+        onInput={(e) => {
+          e.target.style.height = 'auto';
+          e.target.style.height = e.target.scrollHeight + 'px';
+        }}
+      />
+    );
+  }
+
+  return (
+    <input
+      type={type}
+      value={draft}
+      onChange={(e) => commit(e.target.value)}
+      onCompositionStart={handleCompositionStart}
+      onCompositionEnd={handleCompositionEnd}
+      className={className}
+      placeholder={placeholder}
+    />
+  );
+}
+
+function TreeNode({
   flatItem,
   colKey,
   isSelected,
@@ -43,7 +114,6 @@ export default function TreeNode({
   const tagPillStyles = TAG_PILL_STYLES[themeId] || TAG_PILL_STYLES.sand;
   const monoCls = theme.fontMono ? 'font-mono-ui' : '';
 
-  // Sortable hook — skip when this is a drag overlay preview
   const sortable = useSortable({ id: flatItem.id, disabled: isDragOverlay });
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable;
 
@@ -74,10 +144,8 @@ export default function TreeNode({
       style={style}
       className={`px-2 py-1.5 ${hoverCls} ${selectedCls} border-b ${borderRowCls}`}
     >
-      {/* Row 1: drag handle + expand + depth badge + name */}
       <div className="flex items-start gap-1">
         <button
-          ref={null}
           {...attributes}
           {...listeners}
           className={`mt-1 w-4 h-4 flex items-center justify-center ${theme.textDim} hover:${theme.text} flex-shrink-0 cursor-grab active:cursor-grabbing touch-none`}
@@ -107,16 +175,14 @@ export default function TreeNode({
           {numberLabel}
         </span>
 
-        <input
-          type="text"
+        <DraftInput
           value={node.name}
-          onChange={(e) => onUpdate(colKey, flatItem.id, 'name', e.target.value)}
+          onChange={(v) => onUpdate(colKey, flatItem.id, 'name', v)}
           className={`flex-1 min-w-0 px-1.5 py-0.5 text-sm font-medium ${monoCls} border focus:outline-none rounded ${theme.inputTransparent}`}
           placeholder={t.itemNamePlaceholder}
         />
       </div>
 
-      {/* Row 2: tags + actions */}
       <div className="flex items-center gap-1 mt-1 flex-wrap" style={{ marginLeft: '64px' }}>
         {TAG_KEYS.map(tagKey => {
           const meta = TAG_META[tagKey];
@@ -137,7 +203,6 @@ export default function TreeNode({
         })}
         <div className="flex-1" />
 
-        {/* Move buttons */}
         <button
           onClick={() => onMoveUp(colKey, flatItem.id)}
           className={`p-1 ${theme.textMuted} hover:${theme.accentText} rounded`}
@@ -203,19 +268,40 @@ export default function TreeNode({
         </button>
       </div>
 
-      {/* Row 3: description */}
-      <textarea
+      <DraftInput
+        multiline
         value={node.description || ''}
-        onChange={(e) => onUpdate(colKey, flatItem.id, 'description', e.target.value)}
-        className={`mt-1 px-1.5 py-0.5 text-xs ${monoCls} border focus:outline-none rounded resize-none ${theme.inputTransparent} ${theme.textMuted}`}
-        style={{ marginLeft: '64px', width: 'calc(100% - 64px)' }}
+        onChange={(v) => onUpdate(colKey, flatItem.id, 'description', v)}
+        className={`mt-1 px-1.5 py-0.5 text-xs ${monoCls} border focus:outline-none rounded resize-none ${theme.inputTransparent} ${theme.textMuted} block`}
         placeholder={t.itemDescPlaceholder}
         rows={1}
-        onInput={(e) => {
-          e.target.style.height = 'auto';
-          e.target.style.height = e.target.scrollHeight + 'px';
-        }}
       />
     </div>
   );
 }
+
+// Wrap in memo — only re-render when relevant props change.
+// The flatItem reference changes with every keystroke in the parent state though,
+// so we compare by id/content instead of reference.
+export default memo(TreeNode, (prev, next) => {
+  if (prev.colKey !== next.colKey) return false;
+  if (prev.isSelected !== next.isSelected) return false;
+  if (prev.hasClipboard !== next.hasClipboard) return false;
+  if (prev.isDragOverlay !== next.isDragOverlay) return false;
+  const a = prev.flatItem, b = next.flatItem;
+  if (a.id !== b.id) return false;
+  if (a.depth !== b.depth) return false;
+  if (a.siblingIndex !== b.siblingIndex) return false;
+  if (a.hasChildren !== b.hasChildren) return false;
+  if (!!a.hiddenChildren !== !!b.hiddenChildren) return false;
+  if (a.node.name !== b.node.name) return false;
+  if (a.node.description !== b.node.description) return false;
+  // Shallow tag equality
+  const ta = a.node.tags || {}, tb = b.node.tags || {};
+  for (const k of ['common', 'linked', 'commonPending', 'linkedPending', 'review']) {
+    if (!!ta[k] !== !!tb[k]) return false;
+  }
+  // expandedIds is a Set and updates together with hasChildren/hiddenChildren in flatItem;
+  // we already cover the "am I expanded?" via hiddenChildren and the parent will pass new flatItem.
+  return true;
+});
