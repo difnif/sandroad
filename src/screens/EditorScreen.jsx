@@ -23,7 +23,7 @@ import {
   findPath, getNodeAtPath, removeAtPath, insertAtPath, extractNodes
 } from '../utils/treeOps.js';
 import { computeMetrics } from '../utils/metrics.js';
-import { exportProjectAsMarkdown } from '../utils/markdownExport.js';
+import { exportProjectAsMarkdown, exportColumnAsMarkdown } from '../utils/markdownExport.js';
 import { genColumnKey } from '../utils/projectFactory.js';
 import { MAX_DEPTH, getNextColumnColor } from '../constants/theme.js';
 
@@ -336,6 +336,9 @@ export default function EditorScreen() {
     setShowProjectsList(false);
   };
   const handleExport = () => exportProjectAsMarkdown(project, metrics);
+  const handleExportColumn = (colKey, colLabel, colIndex) => {
+    exportColumnAsMarkdown(project, colKey, colLabel, colIndex);
+  };
 
   // ================================================================
   // Drag and drop
@@ -570,6 +573,7 @@ export default function EditorScreen() {
                   onIndent={handleIndent}
                   onMoveUp={handleMoveUp}
                   onMoveDown={handleMoveDown}
+                  onExportColumn={handleExportColumn}
                 />
               ))}
               {project.columns.length < MAX_COLUMNS && (
