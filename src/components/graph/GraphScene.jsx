@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   computeLayout, getColorHex, SCENE_BG, TEXT_COLOR, BOX_BG_COLOR, LINK_RAINBOW
 } from '../../utils/graphLayout.js';
@@ -10,8 +10,7 @@ const BOX_D = 1.2;
 export default function GraphScene({
   nodes, links, project, themeId,
   selectedId, onSelectNode,
-  mode, // 'focus' | 'rainbow'
-  tilt  // degrees, controlled from parent
+  mode, tilt
 }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
@@ -25,7 +24,9 @@ export default function GraphScene({
   const pitchRef = useRef(15);
   const distRef = useRef(70);
   const THREERef = useRef(null);
-  const readyRef = useRef(false);
+
+  // Key fix: state-based ready flag so dependent effects re-run
+  const [sceneReady, setSceneReady] = useState(false);
 
   // ----- Init scene once -----
   useEffect(() => {
@@ -50,7 +51,7 @@ export default function GraphScene({
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(w, h);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       mount.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
@@ -60,9 +61,8 @@ export default function GraphScene({
       scene.add(dir);
 
       updateCamera();
-      readyRef.current = true;
 
-      // ----- Pointer / orbit -----
+      // Pointer / orbit
       let isDragging = false;
       let prevX = 0, prevY = 0;
       let mouseDownPos = null;
@@ -75,10 +75,8 @@ export default function GraphScene({
       };
       const onPointerMove = (e) => {
         if (!isDragging) return;
-        const dx = e.clientX - prevX;
-        const dy = e.clientY - prevY;
-        tiltRef.current += dx * 0.3;
-        pitchRef.current = Math.max(-60, Math.min(60, pitchRef.current + dy * 0.3));
+        tiltRef.current += (e.clientX - prevX) * 0.3;
+        pitchRef.current = Math.max(-60, Math.min(60, pitchRef.current + (e.clientY - prevY) * 0.3));
         prevX = e.clientX;
         prevY = e.clientY;
         updateCamera();
@@ -90,6 +88,57 @@ export default function GraphScene({
         if (moved < 5) handleClick(e);
         mouseDownPos = null;
       };
+
+      // Touch support
+      let lastTouchDist = 0;
+      const onTouchStart = (e) => {
+        if (e.touches.length === 1) {
+          isDragging = true;
+          prevX = e.touches[0].clientX;
+          prevY = e.touches[0].clientY;
+          mouseDownPos = { x: prevX, y: prevY };
+        } else if (e.touches.length === 2) {
+          isDragging = false;
+          lastTouchDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+        }
+      };
+      const onTouchMove = (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && isDragging) {
+          const dx = e.touches[0].clientX - prevX;
+          const dy = e.touches[0].clientY - prevY;
+          tiltRef.current += dx * 0.3;
+          pitchRef.current = Math.max(-60, Math.min(60, pitchRef.current + dy * 0.3));
+          prevX = e.touches[0].clientX;
+          prevY = e.touches[0].clientY;
+          updateCamera();
+        } else if (e.touches.length === 2) {
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          if (lastTouchDist > 0) {
+            const scale = lastTouchDist / dist;
+            distRef.current = Math.max(20, Math.min(200, distRef.current * scale));
+            updateCamera();
+          }
+          lastTouchDist = dist;
+        }
+      };
+      const onTouchEnd = (e) => {
+        if (mouseDownPos && e.changedTouches.length === 1) {
+          const t = e.changedTouches[0];
+          const moved = Math.hypot(t.clientX - mouseDownPos.x, t.clientY - mouseDownPos.y);
+          if (moved < 10) handleClick(t);
+        }
+        isDragging = false;
+        mouseDownPos = null;
+        lastTouchDist = 0;
+      };
+
       const onWheel = (e) => {
         e.preventDefault();
         distRef.current = Math.max(20, Math.min(200, distRef.current * (e.deltaY > 0 ? 1.1 : 0.9)));
@@ -125,6 +174,9 @@ export default function GraphScene({
       renderer.domElement.addEventListener('pointerdown', onPointerDown);
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
+      renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+      renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+      renderer.domElement.addEventListener('touchend', onTouchEnd);
       renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
       window.addEventListener('resize', onResize);
 
@@ -134,13 +186,19 @@ export default function GraphScene({
       };
       animate();
 
+      // Signal ready — this triggers the build effect to run
+      setSceneReady(true);
+
       cleanup = () => {
         cancelled = true;
-        readyRef.current = false;
+        setSceneReady(false);
         cancelAnimationFrame(frameRef.current);
         renderer.domElement.removeEventListener('pointerdown', onPointerDown);
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        renderer.domElement.removeEventListener('touchstart', onTouchStart);
+        renderer.domElement.removeEventListener('touchmove', onTouchMove);
+        renderer.domElement.removeEventListener('touchend', onTouchEnd);
         renderer.domElement.removeEventListener('wheel', onWheel);
         window.removeEventListener('resize', onResize);
         if (mount && renderer.domElement.parentNode === mount) {
@@ -169,7 +227,7 @@ export default function GraphScene({
   // ----- Sync external tilt prop -----
   useEffect(() => {
     if (tilt === null || tilt === undefined) return;
-    if (!readyRef.current) return;
+    if (!sceneReady) return;
     tiltRef.current = tilt;
     const camera = cameraRef.current;
     if (!camera) return;
@@ -180,7 +238,7 @@ export default function GraphScene({
     camera.position.y = Math.sin(pitchRad) * d;
     camera.position.z = Math.cos(tiltRad) * Math.cos(pitchRad) * d;
     camera.lookAt(0, 0, 0);
-  }, [tilt]);
+  }, [tilt, sceneReady]);
 
   // ----- Update background on theme change -----
   useEffect(() => {
@@ -188,13 +246,13 @@ export default function GraphScene({
     const THREE = THREERef.current;
     if (!scene || !THREE) return;
     scene.background = new THREE.Color(SCENE_BG[themeId] || SCENE_BG.sand);
-  }, [themeId]);
+  }, [themeId, sceneReady]);
 
-  // ----- Build boxes/lines whenever data or theme changes -----
+  // ----- Build boxes/lines when data/theme changes OR scene becomes ready -----
   useEffect(() => {
     const scene = sceneRef.current;
     const THREE = THREERef.current;
-    if (!scene || !THREE) return;
+    if (!scene || !THREE || !sceneReady) return;
 
     // Dispose old
     Object.values(boxesRef.current).forEach(m => {
@@ -209,16 +267,12 @@ export default function GraphScene({
     boxesRef.current = {};
 
     linkLinesRef.current.forEach(l => {
-      scene.remove(l);
-      l.geometry.dispose();
-      l.material.dispose();
+      scene.remove(l); l.geometry.dispose(); l.material.dispose();
     });
     linkLinesRef.current = [];
 
     hierLinesRef.current.forEach(l => {
-      scene.remove(l);
-      l.geometry.dispose();
-      l.material.dispose();
+      scene.remove(l); l.geometry.dispose(); l.material.dispose();
     });
     hierLinesRef.current = [];
 
@@ -231,7 +285,7 @@ export default function GraphScene({
       const pos = positions[node.id];
       if (!pos) continue;
       const colorHex = getColorHex(themeId, pos.colColor);
-      const depthScale = 1 - (node.depth - 1) * 0.15;
+      const depthScale = 1 - (node.depth - 1) * 0.12;
 
       const geometry = new THREE.BoxGeometry(BOX_W * depthScale, BOX_H * depthScale, BOX_D);
       const frontTex = makeFaceTexture(THREE, node, colorHex, themeId);
@@ -246,7 +300,7 @@ export default function GraphScene({
       boxesRef.current[node.id] = mesh;
     }
 
-    // Hierarchy lines (parent -> child, in front plane)
+    // Hierarchy lines
     const hierColor = themeId === 'dark' ? 0x6e6e6e : 0xa8a29e;
     for (const node of nodes) {
       if (!node.parentId) continue;
@@ -286,7 +340,7 @@ export default function GraphScene({
       scene.add(line);
       linkLinesRef.current.push(line);
     });
-  }, [nodes, links, project, themeId]);
+  }, [nodes, links, project, themeId, sceneReady]);
 
   // ----- Update visuals based on selection / mode -----
   useEffect(() => {
@@ -327,25 +381,21 @@ export default function GraphScene({
       Object.entries(boxes).forEach(([id, mesh]) => {
         const isConn = connected.has(id);
         mesh.material.forEach(m => {
-          if (m.opacity !== undefined) {
-            m.transparent = !isConn;
-            m.opacity = isConn ? 1 : 0.25;
-          }
+          m.transparent = !isConn;
+          m.opacity = isConn ? 1 : 0.25;
         });
       });
     } else {
       Object.values(boxes).forEach(mesh => {
         mesh.material.forEach(m => {
-          if (m.opacity !== undefined) {
-            m.transparent = false;
-            m.opacity = 1;
-          }
+          m.transparent = false;
+          m.opacity = 1;
         });
       });
     }
   }, [selectedId, mode, links, themeId]);
 
-  return <div ref={mountRef} className="w-full h-full" />;
+  return <div ref={mountRef} className="w-full h-full" style={{ touchAction: 'none' }} />;
 }
 
 // ---- Helpers ----
@@ -366,7 +416,6 @@ function makeFaceTexture(THREE, node, colorHex, themeId) {
   const muted = themeId === 'dark' ? '#858585' : themeId === 'light' ? '#9e9e9e' : '#a8a29e';
   const accentCss = '#' + colorHex.toString(16).padStart(6, '0');
 
-  // Background
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 512, 160);
 
@@ -374,26 +423,26 @@ function makeFaceTexture(THREE, node, colorHex, themeId) {
   ctx.fillStyle = accentCss;
   ctx.fillRect(0, 0, 12, 160);
 
-  // Depth label top-right [L1] / [L2] / [L3]
+  // Depth label top-right
   ctx.fillStyle = muted;
-  ctx.font = '20px Menlo, Monaco, Consolas, monospace';
+  ctx.font = '20px monospace';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   ctx.fillText(`[L${node.depth}]`, 496, 12);
 
-  // Main: > item_name (terminal prompt)
+  // Main: > item_name
   ctx.fillStyle = accentCss;
-  ctx.font = 'bold 36px Menlo, Monaco, Consolas, monospace';
+  ctx.font = 'bold 36px monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText('>', 28, 80);
 
   ctx.fillStyle = fg;
-  ctx.font = 'bold 36px Menlo, Monaco, Consolas, monospace';
+  ctx.font = 'bold 36px monospace';
   const name = (node.name || '').slice(0, 22);
   ctx.fillText(name, 60, 80);
 
-  // Tag indicators bottom row
+  // Tag indicators
   const tags = node.tags || {};
   const dotY = 138;
   let dotX = 28;
@@ -403,7 +452,7 @@ function makeFaceTexture(THREE, node, colorHex, themeId) {
     ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = muted;
-    ctx.font = '14px Menlo, monospace';
+    ctx.font = '14px monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, dotX + 8, dotY);
