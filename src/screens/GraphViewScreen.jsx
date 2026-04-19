@@ -102,13 +102,15 @@ export default function GraphViewScreen() {
               onSelectNode={setSelectedId}
               mode={mode}
               tilt={tilt}
+              onTiltChange={setTilt}
             />
 
             {/* Help hint (top-left) */}
             <div className={`absolute top-3 left-3 ${theme.bgPanel} border ${theme.border} rounded p-2 text-[10px] ${theme.textMuted} ${monoCls} max-w-[200px]`}>
               <div className={`font-semibold ${theme.text} mb-0.5`}>controls</div>
               <div>· drag: rotate view</div>
-              <div>· scroll: zoom</div>
+              <div>· scroll/pinch: zoom</div>
+              <div>· 2-finger drag: pan</div>
               <div>· click box: details</div>
               <div className={`mt-1 pt-1 border-t ${theme.border}`}>
                 tilt the view (5-30°) to reveal links curving behind boxes
