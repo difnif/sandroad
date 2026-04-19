@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Clipboard, Edit2, X, Check } from 'lucide-react';
+import { Clipboard, Edit2, X, Check, FileDown } from 'lucide-react';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import TreeNode from './TreeNode.jsx';
@@ -15,7 +15,8 @@ export default function Column({
   onAddRoot, onPasteToRoot, hasClipboard,
   onToggleExpand, onUpdateNode, onToggleTag, onAddChild,
   onCopy, onPasteAsChild, onRequestDelete, onToggleSelect,
-  onOutdent, onIndent, onMoveUp, onMoveDown
+  onOutdent, onIndent, onMoveUp, onMoveDown,
+  onExportColumn
 }) {
   const { theme, t, themeId } = useTheme();
   const [editingLabel, setEditingLabel] = useState(false);
@@ -128,6 +129,13 @@ export default function Column({
                 className={`text-xs font-medium ${monoCls} px-2 py-1 rounded transition-colors ${styles.addBtn}`}
               >
                 {t.addRoot}
+              </button>
+              <button
+                onClick={() => onExportColumn(column.key, column.label, columnIndex)}
+                className={`p-1 rounded opacity-50 hover:opacity-100 transition-colors ${styles.addBtn}`}
+                title={themeId === 'sand' ? '이 구역 내보내기' : 'Export column'}
+              >
+                <FileDown size={12} />
               </button>
               <button
                 onClick={() => onRequestDeleteColumn(column.key, column.label)}
