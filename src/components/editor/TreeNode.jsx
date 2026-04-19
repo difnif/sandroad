@@ -142,6 +142,9 @@ function TreeNode({
     <div
       ref={setNodeRef}
       style={style}
+      data-node-id={flatItem.id}
+      data-col-key={colKey}
+      data-node-name={node.name || ''}
       className={`px-2 py-1.5 ${hoverCls} ${selectedCls} border-b ${borderRowCls}`}
     >
       <div className="flex items-start gap-1">
