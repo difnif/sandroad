@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderOpen, FileDown, Palette, Box } from 'lucide-react';
+import { FolderOpen, FileDown, Palette, Box, Keyboard } from 'lucide-react';
 import {
   DndContext, DragOverlay,
   PointerSensor, TouchSensor, KeyboardSensor,
@@ -37,7 +37,9 @@ import ProjectsListModal from '../components/editor/ProjectsListModal.jsx';
 import DashboardBar from '../components/dashboard/DashboardBar.jsx';
 import DashboardSettings from '../components/dashboard/DashboardSettings.jsx';
 import AppearanceSettings from '../components/common/AppearanceSettings.jsx';
+import ShortcutsHelp from '../components/common/ShortcutsHelp.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts.js';
 
 const MAX_COLUMNS = 8;
 const MIN_COLUMNS = 1;
@@ -69,6 +71,7 @@ export default function EditorScreen() {
   const [showProjectsList, setShowProjectsList] = useState(false);
   const [showDashSettings, setShowDashSettings] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [activeDragId, setActiveDragId] = useState(null);
 
   const sensors = useSensors(
@@ -239,6 +242,58 @@ export default function EditorScreen() {
       structure: { ...p.structure, [colKey]: moveDownInTree(p.structure[colKey] || [], id) }
     }));
   };
+
+  // ----- Add sibling (for keyboard shortcut) -----
+  const handleAddSibling = (colKey, id) => {
+    if (!project) return;
+    const items = project.structure[colKey] || [];
+    const path = findPath(items, id);
+    if (!path) return;
+    const node = newEmptyNode();
+    if (themeId !== 'sand') node.name = 'new_item';
+    // Insert right after the current node at the same level
+    const insertPath = [...path.slice(0, -1), path[path.length - 1] + 1];
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [colKey]: insertAtPath(p.structure[colKey] || [], insertPath, node) }
+    }));
+    setExpanded(prev => new Set(prev).add(node.id));
+    // Focus the new node's input after render
+    requestAnimationFrame(() => {
+      const container = document.querySelector(`[data-node-id="${node.id}"]`);
+      if (container) {
+        const input = container.querySelector('input[type="text"]');
+        if (input) input.focus();
+      }
+    });
+  };
+
+  // ----- Keyboard shortcuts -----
+  useKeyboardShortcuts({
+    enabled: !!project,
+    selectedIds,
+    onIndent: handleIndent,
+    onOutdent: handleOutdent,
+    onMoveUp: handleMoveUp,
+    onMoveDown: handleMoveDown,
+    onAddSibling: handleAddSibling,
+    onAddChild: handleAddChild,
+    onDelete: handleRequestDelete,
+    onCopy: handleCopy,
+    onPaste: handlePasteAsChild,
+    onToggleExpand: handleToggleExpand,
+    onSelectAll: () => {
+      if (!project) return;
+      const allIds = new Set();
+      for (const col of project.columns) {
+        collectAllIds(project.structure[col.key] || []).forEach(id => allIds.add(id));
+      }
+      setSelectedIds(allIds);
+    },
+    onClearSelection: clearSelection,
+    onSave: () => { /* auto-saved, but prevent browser dialog */ },
+    onNavigateGraph: () => navigate('/graph'),
+  });
 
   // ----- Column -----
   const handleUpdateColumn = (colKey, updates) => {
@@ -431,6 +486,13 @@ export default function EditorScreen() {
             <Box size={14} /> graph
           </button>
           <button
+            onClick={() => setShowShortcuts(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
+            title={themeId === 'sand' ? '단축키' : 'Shortcuts'}
+          >
+            <Keyboard size={14} />
+          </button>
+          <button
             onClick={() => setShowAppearance(true)}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
             title={t.appearance}
@@ -562,6 +624,10 @@ export default function EditorScreen() {
       <AppearanceSettings
         open={showAppearance}
         onClose={() => setShowAppearance(false)}
+      />
+      <ShortcutsHelp
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
       />
     </div>
   );
