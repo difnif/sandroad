@@ -1,19 +1,18 @@
 // Compute 3D positions for nodes given column structure.
-// Layout: each column is a vertical strip in the X axis,
-// items are stacked top-to-bottom by their order/depth.
+// If customPositions is provided, use those instead of auto-layout.
 
 const COL_SPACING = 16;
 const ROW_SPACING = 4;
 const DEPTH_INDENT = 1.2;
 
-export function computeLayout(project, nodes) {
+export function computeLayout(project, nodes, customPositions = {}) {
   if (!project || !nodes.length) return {};
 
   const positions = {};
   const cols = project.columns || [];
   const totalCols = cols.length;
 
-  // Group nodes by column, preserving the order in which they were walked
+  // Group nodes by column
   const byCol = {};
   for (const col of cols) byCol[col.key] = [];
   for (const node of nodes) {
@@ -27,7 +26,18 @@ export function computeLayout(project, nodes) {
     colNodes.forEach((node, rowIdx) => {
       const depthIndent = (node.depth - 1) * DEPTH_INDENT;
       const y = -(rowIdx - colHeight / 2) * ROW_SPACING;
-      positions[node.id] = { x: x + depthIndent, y, z: 0, colColor: col.color };
+
+      // Use custom position if available, else auto
+      if (customPositions[node.id]) {
+        positions[node.id] = {
+          x: customPositions[node.id].x,
+          y: customPositions[node.id].y,
+          z: 0,
+          colColor: col.color
+        };
+      } else {
+        positions[node.id] = { x: x + depthIndent, y, z: 0, colColor: col.color };
+      }
     });
   });
 
@@ -55,27 +65,9 @@ export function getColorHex(themeId, colorKey) {
   return themeMap[colorKey] || themeMap[Object.keys(themeMap)[0]];
 }
 
-// Background color per theme for the 3D scene
-export const SCENE_BG = {
-  sand: 0xfef3c7,
-  dark: 0x1e1e1e,
-  light: 0xffffff
-};
-
-// Text color per theme
-export const TEXT_COLOR = {
-  sand: '#1c1917',
-  dark: '#cccccc',
-  light: '#1e1e1e'
-};
-
-export const BOX_BG_COLOR = {
-  sand: '#ffffff',
-  dark: '#252526',
-  light: '#ffffff'
-};
-
-// Rainbow colors for link rendering
+export const SCENE_BG = { sand: 0xfef3c7, dark: 0x1e1e1e, light: 0xffffff };
+export const TEXT_COLOR = { sand: '#1c1917', dark: '#cccccc', light: '#1e1e1e' };
+export const BOX_BG_COLOR = { sand: '#ffffff', dark: '#252526', light: '#ffffff' };
 export const LINK_RAINBOW = [
   0xef4444, 0xf59e0b, 0xeab308, 0x10b981,
   0x06b6d4, 0x3b82f6, 0x8b5cf6, 0xec4899
