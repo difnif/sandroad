@@ -169,7 +169,7 @@ export default function GraphScene({
 
       // Fill
       const fillAlpha = reg.depth === 0 ? 0.12 : reg.depth === 1 ? 0.18 : 0.25;
-      const shape = makeRoundedRectShape(w, h, radius);
+      const shape = makeRoundedRectShape(THREE, w, h, radius);
       const shapeGeom = new THREE.ShapeGeometry(shape);
       const fillMat = new THREE.MeshBasicMaterial({ color: style.fill, transparent: true, opacity: fillAlpha, side: THREE.DoubleSide, depthWrite: false });
       const fillMesh = new THREE.Mesh(shapeGeom, fillMat);
@@ -258,10 +258,9 @@ export default function GraphScene({
 
 // --- Helpers ---
 
-function makeRoundedRectShape(w, h, r) {
-  // THREE.Shape expects coords centered at (0,0)
+function makeRoundedRectShape(THREE, w, h, r) {
   const hw = w / 2, hh = h / 2;
-  const shape = new (window.__THREE_SHAPE__ || getShapeClass())();
+  const shape = new THREE.Shape();
   shape.moveTo(-hw + r, -hh);
   shape.lineTo(hw - r, -hh);
   shape.quadraticCurveTo(hw, -hh, hw, -hh + r);
@@ -272,17 +271,6 @@ function makeRoundedRectShape(w, h, r) {
   shape.lineTo(-hw, -hh + r);
   shape.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
   return shape;
-}
-
-// Lazy get THREE.Shape class
-let _ShapeClass = null;
-function getShapeClass() {
-  if (!_ShapeClass) {
-    // THREE is loaded dynamically, grab Shape from the module ref
-    const THREE = window.__THREE_MODULE__;
-    if (THREE) _ShapeClass = THREE.Shape;
-  }
-  return _ShapeClass || class { moveTo() {} lineTo() {} quadraticCurveTo() {} getPoints() { return []; } };
 }
 
 function buildSiblingMap(nodes) {
@@ -297,10 +285,6 @@ function getSideColor(themeId, depth) {
   return [0xfafaf9, 0xf5f5f4, 0xe7e5e4, 0xd6d3d1, 0xc8c5c3][d-1];
 }
 function makeFaceTexture(THREE, node, colorHex, themeId, siblingIndex) {
-  // Store THREE.Shape for region use
-  window.__THREE_MODULE__ = THREE;
-  window.__THREE_SHAPE__ = THREE.Shape;
-
   const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 160;
   const ctx = canvas.getContext('2d');
   const d = Math.min(node.depth, 5) - 1;
