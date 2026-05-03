@@ -8,7 +8,9 @@ import { useProjectsList } from '../hooks/useProjectsList.js';
 import { useProjectData } from '../hooks/useProjectData.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { updateInTree } from '../utils/treeOps.js';
-import { createRoad, addRoad, removeRoad, updateRoad, generateRoadsFromTree, VEHICLE_INFO } from '../utils/cityRoads.js';
+import { createRoad, addRoad, removeRoad, updateRoad, generateRoadsFromTree, VEHICLE_TYPES, DATA_TYPES } from '../utils/cityRoads.js';
+import { getBuildingType, getLabel, getDesc } from '../constants/unitTypes.js';
+import UnitTypePicker from '../components/city/UnitTypePicker.jsx';
 import CityCanvas from '../components/city/CityCanvas.jsx';
 import ActionTimeline from '../components/graph/ActionTimeline.jsx';
 import ConsultBar from '../components/graph/ConsultBar.jsx';
@@ -33,6 +35,7 @@ export default function CityViewScreen() {
   const [aiLoading, setAiLoading] = useState(false);
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [typePicker, setTypePicker] = useState(null); // { mode, nodeId, currentValue }
   const inlineInputRef = useRef(null);
   const autoRoadsGenerated = useRef(false);
 
@@ -186,56 +189,25 @@ export default function CityViewScreen() {
     if (selectedRoadId === roadId) setSelectedRoadId(null);
   };
 
+  // Building type change
+  const handleBuildingTypeChange = (nodeId, newType) => {
+    const node = findNode(nodeId); if (!node) return;
+    saveSnapshot();
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], nodeId, { buildingType: newType }) }
+    }));
+    record(ACTION_TYPES.TAG_CHANGE, { nodeId, nodeName: node.name, tagName: `type:${newType}` });
+  };
+
   // Chat
-  const handleSendMessage = async (text, pinnedContext) => {
-    // Add user message to chat
-    const userMsg = { role: 'user', content: text };
-    if (pinnedContext) {
-      userMsg.actions = pinnedContext.split('\n').map(l => {
-        const m = l.match(/^#(\d+): (.+)/);
-        return m ? { num: parseInt(m[1]), description: m[2] } : null;
-      }).filter(Boolean);
-    }
-    setChatMessages(prev => [...prev, userMsg]);
+  const handleSendMessage = (text) => {
+    setChatMessages(prev => [...prev, { role: 'user', content: text }]);
     setAiLoading(true);
-
-    try {
-      // Build project structure summary (compact)
-      const structureSummary = {};
-      for (const col of project?.columns || []) {
-        structureSummary[col.label] = summarizeTree(project.structure[col.key] || []);
-      }
-
-      const response = await fetch('/api/consult', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          actions: userMsg.actions || [],
-          projectStructure: structureSummary,
-          projectName: project?.name || '',
-          themeId
-        })
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
-    } catch (err) {
-      console.error('AI consult error:', err);
-      setChatMessages(prev => [...prev, {
-        role: 'assistant',
-        content: lang === 'ko'
-          ? `⚠️ 연결 오류: ${err.message}\n\nVercel 환경변수에 ANTHROPIC_API_KEY를 설정했는지 확인하세요.`
-          : `⚠️ Connection error: ${err.message}\n\nMake sure ANTHROPIC_API_KEY is set in Vercel env vars.`
-      }]);
-    } finally {
+    setTimeout(() => {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: lang === 'ko' ? `요청 확인: "${text}"\nClaude API 연동 후 사용 가능.` : `Received: "${text}"` }]);
       setAiLoading(false);
-    }
+    }, 1000);
   };
 
   if (projectsLoading || !tabsLoaded) return <LoadingSpinner />;
@@ -294,12 +266,30 @@ export default function CityViewScreen() {
             />
 
             {/* Selected node panel */}
-            {selectedNode && (
-              <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[280px] z-10`}>
-                <div className={`font-bold ${theme.text} text-sm`}>{selectedNode.name}</div>
-                <div className={`text-[10px] ${theme.textMuted} mt-0.5`}>
-                  {selectedNode.children?.length ? `${selectedNode.children.length} children` : 'leaf'}
+            {selectedNode && (() => {
+              const bt = getBuildingType(selectedNode.buildingType);
+              return (
+              <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[300px] z-10`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{bt.emoji}</span>
+                  <div className="flex-1">
+                    <div className={`font-bold ${theme.text} text-sm`}>{selectedNode.name}</div>
+                    <div className={`text-[10px] ${theme.textMuted}`}>
+                      {getLabel(bt, lang)} · {selectedNode.children?.length ? `${selectedNode.children.length} children` : 'leaf'}
+                    </div>
+                  </div>
+                  <div className="w-3 h-8 rounded-sm" style={{ backgroundColor: bt.color }} />
                 </div>
+
+                {/* Type change button */}
+                <button
+                  onClick={() => setTypePicker({ mode: 'building', nodeId: selectedId, currentValue: selectedNode.buildingType || 'page' })}
+                  className={`mt-2 w-full flex items-center gap-1.5 px-2 py-1 text-[10px] rounded border ${theme.button}`}
+                  style={{ borderLeftColor: bt.color, borderLeftWidth: 3 }}
+                >
+                  {bt.emoji} {lang === 'ko' ? '건물 유형 변경' : 'Change type'}
+                </button>
+
                 {selectedNodeRoads.length > 0 && (
                   <div className={`mt-2 pt-2 border-t ${theme.border}`}>
                     <div className={`text-[9px] font-bold ${theme.text} mb-1`}>
@@ -308,10 +298,11 @@ export default function CityViewScreen() {
                     {selectedNodeRoads.map(road => {
                       const otherId = road.from === selectedId ? road.to : road.from;
                       const other = findNode(otherId);
-                      const vi = VEHICLE_INFO[road.vehicle] || VEHICLE_INFO.car;
+                      const vi = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
+                      const dt = DATA_TYPES[road.dataType] || DATA_TYPES.content;
                       return (
                         <div key={road.id} className="flex items-center gap-1 mb-0.5">
-                          <span>{vi.emoji}</span>
+                          <span>{vi.emoji}{dt.emoji}</span>
                           <span className={`text-[10px] ${theme.text} flex-1 truncate`}>→ {other?.name || '?'}</span>
                           <button onClick={() => handleRoadDelete(road.id)} className="text-[9px] text-red-400 hover:text-red-600">✗</button>
                         </div>
@@ -329,21 +320,22 @@ export default function CityViewScreen() {
                   <button onClick={() => setSelectedId(null)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>✗</button>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Selected road panel */}
             {selectedRoad && !selectedNode && (
               <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[280px] z-10`}>
                 <div className={`font-bold ${theme.text} text-sm`}>
-                  {VEHICLE_INFO[selectedRoad.vehicle]?.emoji} {lang === 'ko' ? '도로' : 'Road'}
+                  {VEHICLE_TYPES[selectedRoad.vehicle]?.emoji} {lang === 'ko' ? '도로' : 'Road'}
                 </div>
                 <div className={`text-[10px] ${theme.textMuted} mt-1`}>
                   {findNode(selectedRoad.from)?.name || '?'} → {findNode(selectedRoad.to)?.name || '?'}
                 </div>
                 <div className={`text-[10px] ${theme.textMuted} mt-0.5`}>
                   {lang === 'ko'
-                    ? `${VEHICLE_INFO[selectedRoad.vehicle]?.desc_ko || ''}`
-                    : `${VEHICLE_INFO[selectedRoad.vehicle]?.desc_en || ''}`}
+                    ? `${VEHICLE_TYPES[selectedRoad.vehicle]?.desc_ko || ''}`
+                    : `${VEHICLE_TYPES[selectedRoad.vehicle]?.desc_en || ''}`}
                 </div>
                 <div className="mt-2 flex gap-1">
                   <button onClick={() => handleRoadDelete(selectedRoad.id)} className={`px-2 py-1 text-[10px] rounded bg-red-500 text-white`}>
@@ -398,6 +390,20 @@ export default function CityViewScreen() {
 
       <ConsultBar collapsed={consultCollapsed} onToggleCollapse={() => setConsultCollapsed(p => !p)}
         onSendMessage={handleSendMessage} messages={chatMessages} isLoading={aiLoading} />
+
+      {/* Unit Type Picker Modal */}
+      {typePicker && (
+        <UnitTypePicker
+          mode={typePicker.mode}
+          currentValue={typePicker.currentValue}
+          onSelect={(typeKey) => {
+            if (typePicker.mode === 'building' && typePicker.nodeId) {
+              handleBuildingTypeChange(typePicker.nodeId, typeKey);
+            }
+          }}
+          onClose={() => setTypePicker(null)}
+        />
+      )}
     </div>
   );
 }
@@ -408,14 +414,4 @@ function findInTree(nodes, id) {
     if (n.children) { const f = findInTree(n.children, id); if (f) return f; }
   }
   return null;
-}
-
-function summarizeTree(nodes, depth = 1) {
-  return nodes.map(n => {
-    const entry = { name: n.name || '(unnamed)' };
-    if (n.children && n.children.length > 0) {
-      entry.children = summarizeTree(n.children, depth + 1);
-    }
-    return entry;
-  });
 }
