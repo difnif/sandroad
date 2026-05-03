@@ -187,13 +187,55 @@ export default function CityViewScreen() {
   };
 
   // Chat
-  const handleSendMessage = (text) => {
-    setChatMessages(prev => [...prev, { role: 'user', content: text }]);
+  const handleSendMessage = async (text, pinnedContext) => {
+    // Add user message to chat
+    const userMsg = { role: 'user', content: text };
+    if (pinnedContext) {
+      userMsg.actions = pinnedContext.split('\n').map(l => {
+        const m = l.match(/^#(\d+): (.+)/);
+        return m ? { num: parseInt(m[1]), description: m[2] } : null;
+      }).filter(Boolean);
+    }
+    setChatMessages(prev => [...prev, userMsg]);
     setAiLoading(true);
-    setTimeout(() => {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: lang === 'ko' ? `요청 확인: "${text}"\nClaude API 연동 후 사용 가능.` : `Received: "${text}"` }]);
+
+    try {
+      // Build project structure summary (compact)
+      const structureSummary = {};
+      for (const col of project?.columns || []) {
+        structureSummary[col.label] = summarizeTree(project.structure[col.key] || []);
+      }
+
+      const response = await fetch('/api/consult', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          actions: userMsg.actions || [],
+          projectStructure: structureSummary,
+          projectName: project?.name || '',
+          themeId
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch (err) {
+      console.error('AI consult error:', err);
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: lang === 'ko'
+          ? `⚠️ 연결 오류: ${err.message}\n\nVercel 환경변수에 ANTHROPIC_API_KEY를 설정했는지 확인하세요.`
+          : `⚠️ Connection error: ${err.message}\n\nMake sure ANTHROPIC_API_KEY is set in Vercel env vars.`
+      }]);
+    } finally {
       setAiLoading(false);
-    }, 1000);
+    }
   };
 
   if (projectsLoading || !tabsLoaded) return <LoadingSpinner />;
@@ -366,4 +408,14 @@ function findInTree(nodes, id) {
     if (n.children) { const f = findInTree(n.children, id); if (f) return f; }
   }
   return null;
+}
+
+function summarizeTree(nodes, depth = 1) {
+  return nodes.map(n => {
+    const entry = { name: n.name || '(unnamed)' };
+    if (n.children && n.children.length > 0) {
+      entry.children = summarizeTree(n.children, depth + 1);
+    }
+    return entry;
+  });
 }
