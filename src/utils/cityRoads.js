@@ -1,9 +1,12 @@
-// Road data model and utilities
+// Road data utilities - uses unitTypes.js for type definitions
 
 import { genNodeId } from './idGen.js';
+import { VEHICLE_TYPES, ROAD_TYPES, DATA_TYPES } from '../constants/unitTypes.js';
 
-export function createRoad(fromId, toId, type = 'main', vehicle = 'car', label = '') {
-  return { id: genNodeId(), from: fromId, to: toId, type, vehicle, label };
+export { VEHICLE_TYPES, ROAD_TYPES, DATA_TYPES };
+
+export function createRoad(fromId, toId, roadType = 'main', vehicle = 'car', dataType = 'content', label = '') {
+  return { id: genNodeId(), from: fromId, to: toId, type: roadType, vehicle, dataType, label };
 }
 
 export function addRoad(roads, road) {
@@ -22,8 +25,6 @@ export function updateRoad(roads, roadId, updates) {
   return (roads || []).map(r => r.id === roadId ? { ...r, ...updates } : r);
 }
 
-// Auto-generate roads from tree hierarchy (parent → child connections)
-// Only generates for direct parent-child pairs that don't already have a road
 export function generateRoadsFromTree(project) {
   if (!project) return [];
   const existingRoads = project.roads || [];
@@ -36,11 +37,9 @@ export function generateRoadsFromTree(project) {
       const key = [parentId, node.id].sort().join('|');
       if (existingPairs.has(key)) return;
       existingPairs.add(key);
-
-      // Determine road type: L1→L2 = main, deeper = sub
       const depth = getNodeDepth(project.structure[col.key], node.id);
-      const type = depth <= 2 ? 'main' : 'sub';
-      newRoads.push(createRoad(parentId, node.id, type, 'car'));
+      const roadType = depth <= 2 ? 'main' : 'sub';
+      newRoads.push(createRoad(parentId, node.id, roadType, 'car', 'content'));
     });
   }
   return newRoads;
@@ -61,27 +60,18 @@ function getNodeDepth(nodes, id, depth = 1) {
   return 0;
 }
 
-export const VEHICLE_INFO = {
-  car:    { emoji: '🚗', emojiFlip: '🚗', label_ko: '차량', label_en: 'Car',    color: '#3b82f6', desc_ko: '일반 통신/데이터 이동', desc_en: 'Standard data flow' },
-  drone:  { emoji: '🚁', emojiFlip: '🚁', label_ko: '드론', label_en: 'Drone',  color: '#8b5cf6', desc_ko: 'API 연동/비동기', desc_en: 'API / async connection' },
-  worker: { emoji: '👷', emojiFlip: '👷', label_ko: '인력', label_en: 'Worker', color: '#f59e0b', desc_ko: '수동 작업/관리', desc_en: 'Manual operation' }
-};
-
-export const ROAD_TYPES = {
-  main: { width: 6, dash: null,   label_ko: '대로', label_en: 'Main road' },
-  sub:  { width: 3, dash: [8, 4], label_ko: '소로', label_en: 'Sub road' }
-};
-
 export function createVehicleAnimState(road) {
+  const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
   return {
     roadId: road.id,
-    progress: Math.random(), // stagger start
-    speed: 0.002 + Math.random() * 0.002,
+    progress: Math.random(),
+    speed: 0.002 * (vt.speed || 1),
     direction: 1,
     vehicle: road.vehicle,
+    dataType: road.dataType || 'content',
     from: road.from,
     to: road.to,
-    x: 0, y: 0, // current position (updated each frame)
-    movingRight: true // for flip
+    x: 0, y: 0,
+    movingRight: true
   };
 }
