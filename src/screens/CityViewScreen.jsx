@@ -32,6 +32,7 @@ export default function CityViewScreen() {
   const [chatMessages, setChatMessages] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const inlineInputRef = useRef(null);
   const autoRoadsGenerated = useRef(false);
 
@@ -218,13 +219,6 @@ export default function CityViewScreen() {
           <Redo2 size={14} />
         </button>
 
-        {/* Pause indicator */}
-        {paused && (
-          <span className={`text-[10px] px-2 py-0.5 rounded bg-red-500 text-white font-bold ${monoCls}`}>
-            ⏸ {lang === 'ko' ? '정지' : 'PAUSED'}
-          </span>
-        )}
-
         <div className="flex-1" />
         <button onClick={() => navigate('/')} className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded ${monoCls} ${theme.button}`}>
           <Edit3 size={12} /> editor
@@ -254,7 +248,7 @@ export default function CityViewScreen() {
               roads={roads} onRoadCreate={handleRoadCreate}
               onRoadDelete={handleRoadDelete} onPlaceItem={handlePlaceItem}
               onRoadSelect={setSelectedRoadId} selectedRoadId={selectedRoadId}
-              paused={paused}
+              paused={paused} speed={speed}
             />
 
             {/* Selected node panel */}
@@ -334,6 +328,26 @@ export default function CityViewScreen() {
                 </div>
               </div>
             )}
+
+            {/* Playback controls — top left */}
+            <div className={`absolute top-12 left-3 flex items-center gap-1 ${theme.bgPanel} border ${theme.border} rounded-lg px-2 py-1 shadow-md z-10`}>
+              <button
+                onClick={() => setPaused(p => !p)}
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-sm ${paused ? 'bg-emerald-500 text-white' : `${theme.bgAlt} ${theme.text}`}`}
+                title={paused ? 'Play (Space)' : 'Pause (Space)'}
+              >
+                {paused ? '▶' : '⏸'}
+              </button>
+              <div className={`w-px h-5 ${theme.border} mx-0.5`} />
+              {[1, 2, 4, 8].map(s => (
+                <button key={s}
+                  onClick={() => { setSpeed(s); if (paused) setPaused(false); }}
+                  className={`px-1.5 py-0.5 text-[9px] rounded font-bold ${monoCls} ${speed === s && !paused ? theme.buttonPrimary : theme.button} border`}
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
 
             <ActionTimeline collapsed={timelineCollapsed} onToggleCollapse={() => setTimelineCollapsed(p => !p)} />
           </>
