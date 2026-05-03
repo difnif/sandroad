@@ -11,7 +11,7 @@ const ROAD_HIT_DIST = 8; // px distance to consider a road click
 export default function CityCanvas({
   project, themeId, selectedId, onSelectNode, onRequestInlineEdit,
   onPositionConfirm, roads, onRoadCreate, onRoadDelete, onPlaceItem,
-  onRoadSelect, selectedRoadId, paused
+  onRoadSelect, selectedRoadId, paused, speed
 }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -233,7 +233,7 @@ export default function CityCanvas({
 
         // Animate (unless paused)
         if (!paused) {
-          anim.progress += anim.speed;
+          anim.progress += anim.speed * (speed || 1);
           if (anim.progress > 1) { anim.progress = 0; anim.direction *= -1; }
         }
 
@@ -307,26 +307,12 @@ export default function CityCanvas({
         ctx.setLineDash([]);
       }
 
-      // Paused overlay
-      if (paused) {
-        ctx.restore(); ctx.save();
-        ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
-        ctx.fillStyle = themeId === 'dark' ? '#cccccc' : '#1e1e1e';
-        ctx.font = 'bold 24px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(lang === 'ko' ? '⏸ 일시정지' : '⏸ PAUSED', canvasSize.w/2, canvasSize.h/2);
-        ctx.font = '12px monospace';
-        ctx.fillText(lang === 'ko' ? 'Space로 재개' : 'Press Space to resume', canvasSize.w/2, canvasSize.h/2 + 28);
-        ctx.restore(); ctx.save();
-        ctx.translate(viewState.panX, viewState.panY); ctx.scale(viewState.zoom, viewState.zoom);
-      }
-
       ctx.restore();
       animFrameRef.current = requestAnimationFrame(draw);
     };
     draw();
     return () => { running = false; if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-  }, [layout, viewState, canvasSize, themeId, selectedId, hoveredId, project, dragState, allRoads, roadMode, roadFrom, hoveredRoadId, hoveredVehicle, selectedRoadId, paused, itemMap]);
+  }, [layout, viewState, canvasSize, themeId, selectedId, hoveredId, project, dragState, allRoads, roadMode, roadFrom, hoveredRoadId, hoveredVehicle, selectedRoadId, paused, speed, itemMap]);
 
   // ====== Pointer ======
   const handlePointerDown = (e) => {
