@@ -1,13 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderOpen, FileDown, Palette, Box, Keyboard } from 'lucide-react';
-import {
-  DndContext, DragOverlay,
-  PointerSensor, TouchSensor, KeyboardSensor,
-  useSensor, useSensors, closestCenter, pointerWithin
-} from '@dnd-kit/core';
-import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
-
+import { FolderOpen, Palette, Box } from 'lucide-react';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../firebase/config.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useProjectsList } from '../hooks/useProjectsList.js';
@@ -15,18 +10,14 @@ import { useProjectData } from '../hooks/useProjectData.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { useClipboard } from '../hooks/useClipboard.js';
 import { useDashboardSettings } from '../hooks/useDashboardSettings.js';
-
 import {
   updateInTree, toggleTagInTree, addChildInTree, removeFromTree,
-  findNodeInTree, findDepthInTree, collectAllIds, cloneNodeWithNewIds, newEmptyNode,
-  outdentInTree, indentInTree, moveUpInTree, moveDownInTree,
-  findPath, getNodeAtPath, removeAtPath, insertAtPath, extractNodes
+  findNodeInTree, findDepthInTree, collectAllIds, cloneNodeWithNewIds, newEmptyNode
 } from '../utils/treeOps.js';
 import { computeMetrics } from '../utils/metrics.js';
-import { exportProjectAsMarkdown, exportColumnAsMarkdown } from '../utils/markdownExport.js';
+import { exportProjectAsMarkdown } from '../utils/markdownExport.js';
 import { genColumnKey } from '../utils/projectFactory.js';
-import { MAX_DEPTH, getNextColumnColor } from '../constants/theme.js';
-
+import { getNextColumnColor } from '../constants/themes.js';
 import Column from '../components/editor/Column.jsx';
 import AddColumnCard from '../components/editor/AddColumnCard.jsx';
 import TabBar from '../components/editor/TabBar.jsx';
@@ -37,22 +28,12 @@ import ProjectsListModal from '../components/editor/ProjectsListModal.jsx';
 import DashboardBar from '../components/dashboard/DashboardBar.jsx';
 import DashboardSettings from '../components/dashboard/DashboardSettings.jsx';
 import AppearanceSettings from '../components/common/AppearanceSettings.jsx';
-import ShortcutsHelp from '../components/common/ShortcutsHelp.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
-import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts.js';
+import FileToolbar from '../components/editor/FileToolbar.jsx';
 
+const MAX_DEPTH = 5;
 const MAX_COLUMNS = 8;
 const MIN_COLUMNS = 1;
-
-// Find which column a node belongs to within the project
-function findColumnForNode(project, nodeId) {
-  if (!project) return null;
-  for (const col of project.columns || []) {
-    const items = project.structure?.[col.key] || [];
-    if (findPath(items, nodeId)) return col.key;
-  }
-  return null;
-}
 
 export default function EditorScreen() {
   const navigate = useNavigate();
@@ -65,403 +46,124 @@ export default function EditorScreen() {
   const { settings: dashSettings, setSettings: setDashSettings } = useDashboardSettings();
 
   const [expanded, setExpanded] = useState(new Set());
-  const [selectedIds, setSelectedIds] = useState(new Set());
   const [pendingDelete, setPendingDelete] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [showProjectsList, setShowProjectsList] = useState(false);
   const [showDashSettings, setShowDashSettings] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  const [activeDragId, setActiveDragId] = useState(null);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
 
   useEffect(() => {
     if (!tabsLoaded || projectsLoading) return;
-    if (openIds.length === 0 && projects.length > 0 && !activeId) {
-      openTab(projects[0].id);
-    }
+    if (openIds.length === 0 && projects.length > 0 && !activeId) openTab(projects[0].id);
   }, [tabsLoaded, projectsLoading, openIds.length, projects, activeId, openTab]);
 
   useEffect(() => {
     if (!project) return;
     const ids = new Set();
-    for (const c of project.columns || []) {
-      collectAllIds(project.structure?.[c.key] || []).forEach(id => ids.add(id));
-    }
+    for (const c of project.columns || []) collectAllIds(project.structure?.[c.key] || []).forEach(id => ids.add(id));
     setExpanded(ids);
-    setSelectedIds(new Set());
-    // eslint-disable-next-line
   }, [activeId]);
 
   const metrics = useMemo(() => computeMetrics(project), [project]);
 
-  // ----- Node ops -----
   const handleUpdateNode = (colKey, id, field, value) => {
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: updateInTree(p.structure[colKey] || [], id, { [field]: value }) }
-    }));
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [colKey]: updateInTree(p.structure[colKey] || [], id, { [field]: value }) } }));
   };
   const handleToggleTag = (colKey, id, tagName) => {
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: toggleTagInTree(p.structure[colKey] || [], id, tagName) }
-    }));
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [colKey]: toggleTagInTree(p.structure[colKey] || [], id, tagName) } }));
   };
   const handleAddRoot = (colKey) => {
-    const node = newEmptyNode();
-    if (themeId !== 'sand') node.name = 'new_item';
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: [...(p.structure[colKey] || []), node] }
-    }));
+    const node = newEmptyNode(); if (themeId !== 'sand') node.name = 'new_item';
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [colKey]: [...(p.structure[colKey] || []), node] } }));
     setExpanded(prev => new Set(prev).add(node.id));
   };
   const handleAddChild = (colKey, parentId) => {
-    const node = newEmptyNode();
-    if (themeId !== 'sand') node.name = 'new_item';
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: addChildInTree(p.structure[colKey] || [], parentId, node) }
-    }));
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.add(parentId);
-      next.add(node.id);
-      return next;
-    });
+    const node = newEmptyNode(); if (themeId !== 'sand') node.name = 'new_item';
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [colKey]: addChildInTree(p.structure[colKey] || [], parentId, node) } }));
+    setExpanded(prev => { const next = new Set(prev); next.add(parentId); next.add(node.id); return next; });
   };
-  const handleRequestDelete = (colKey, id, name) => {
-    setPendingDelete({ type: 'node', colKey, id, name });
-  };
+  const handleRequestDelete = (colKey, id, name) => setPendingDelete({ type: 'node', colKey, id, name });
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
     if (pendingDelete.type === 'node') {
-      const { colKey, id } = pendingDelete;
-      updateLocal(p => ({
-        ...p,
-        structure: { ...p.structure, [colKey]: removeFromTree(p.structure[colKey] || [], id) }
-      }));
+      updateLocal(p => ({ ...p, structure: { ...p.structure, [pendingDelete.colKey]: removeFromTree(p.structure[pendingDelete.colKey] || [], pendingDelete.id) } }));
     } else if (pendingDelete.type === 'project') {
       await remove(pendingDelete.id);
       if (activeId === pendingDelete.id) closeTab(pendingDelete.id);
     } else if (pendingDelete.type === 'column') {
-      const { colKey } = pendingDelete;
       updateLocal(p => {
         if (p.columns.length <= MIN_COLUMNS) return p;
-        const newColumns = p.columns.filter(c => c.key !== colKey);
-        const newStructure = { ...p.structure };
-        delete newStructure[colKey];
-        return { ...p, columns: newColumns, structure: newStructure };
+        const newCols = p.columns.filter(c => c.key !== pendingDelete.colKey);
+        const newStr = { ...p.structure }; delete newStr[pendingDelete.colKey];
+        return { ...p, columns: newCols, structure: newStr };
       });
     }
     setPendingDelete(null);
   };
   const handleToggleExpand = (nodeId) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
-      return next;
-    });
+    setExpanded(prev => { const next = new Set(prev); if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId); return next; });
   };
-
-  // ----- Selection -----
-  const handleToggleSelect = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const clearSelection = () => setSelectedIds(new Set());
-
-  // ----- Clipboard -----
   const handleCopy = (colKey, id) => {
     if (!project) return;
     const node = findNodeInTree(project.structure[colKey] || [], id);
-    if (!node) return;
-    copy(node, project.name);
+    if (node) copy(node, project.name);
   };
   const handlePasteToRoot = (colKey) => {
     if (!clipboard) return;
     const cloned = cloneNodeWithNewIds(clipboard.node);
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: [...(p.structure[colKey] || []), cloned] }
-    }));
-    setExpanded(prev => {
-      const next = new Set(prev);
-      collectAllIds([cloned]).forEach(id => next.add(id));
-      return next;
-    });
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [colKey]: [...(p.structure[colKey] || []), cloned] } }));
+    setExpanded(prev => { const next = new Set(prev); collectAllIds([cloned]).forEach(id => next.add(id)); return next; });
   };
   const handlePasteAsChild = (colKey, parentId) => {
     if (!clipboard || !project) return;
-    const parentDepth = findDepthInTree(project.structure[colKey] || [], parentId);
-    if (parentDepth >= MAX_DEPTH) return;
+    if (findDepthInTree(project.structure[colKey] || [], parentId) >= MAX_DEPTH) return;
     const cloned = cloneNodeWithNewIds(clipboard.node);
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: addChildInTree(p.structure[colKey] || [], parentId, cloned) }
-    }));
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.add(parentId);
-      collectAllIds([cloned]).forEach(id => next.add(id));
-      return next;
-    });
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [colKey]: addChildInTree(p.structure[colKey] || [], parentId, cloned) } }));
+    setExpanded(prev => { const next = new Set(prev); next.add(parentId); collectAllIds([cloned]).forEach(id => next.add(id)); return next; });
   };
-
-  // ----- Indent/Outdent/MoveUp/MoveDown -----
-  const handleOutdent = (colKey, id) => {
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: outdentInTree(p.structure[colKey] || [], id) }
-    }));
-  };
-  const handleIndent = (colKey, id) => {
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: indentInTree(p.structure[colKey] || [], id, MAX_DEPTH) }
-    }));
-  };
-  const handleMoveUp = (colKey, id) => {
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: moveUpInTree(p.structure[colKey] || [], id) }
-    }));
-  };
-  const handleMoveDown = (colKey, id) => {
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: moveDownInTree(p.structure[colKey] || [], id) }
-    }));
-  };
-
-  // ----- Add sibling (for keyboard shortcut) -----
-  const handleAddSibling = (colKey, id) => {
-    if (!project) return;
-    const items = project.structure[colKey] || [];
-    const path = findPath(items, id);
-    if (!path) return;
-    const node = newEmptyNode();
-    if (themeId !== 'sand') node.name = 'new_item';
-    // Insert right after the current node at the same level
-    const insertPath = [...path.slice(0, -1), path[path.length - 1] + 1];
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [colKey]: insertAtPath(p.structure[colKey] || [], insertPath, node) }
-    }));
-    setExpanded(prev => new Set(prev).add(node.id));
-    // Focus the new node's input after render
-    requestAnimationFrame(() => {
-      const container = document.querySelector(`[data-node-id="${node.id}"]`);
-      if (container) {
-        const input = container.querySelector('input[type="text"]');
-        if (input) input.focus();
-      }
-    });
-  };
-
-  // ----- Keyboard shortcuts -----
-  useKeyboardShortcuts({
-    enabled: !!project,
-    selectedIds,
-    onIndent: handleIndent,
-    onOutdent: handleOutdent,
-    onMoveUp: handleMoveUp,
-    onMoveDown: handleMoveDown,
-    onAddSibling: handleAddSibling,
-    onAddChild: handleAddChild,
-    onDelete: handleRequestDelete,
-    onCopy: handleCopy,
-    onPaste: handlePasteAsChild,
-    onToggleExpand: handleToggleExpand,
-    onSelectAll: () => {
-      if (!project) return;
-      const allIds = new Set();
-      for (const col of project.columns) {
-        collectAllIds(project.structure[col.key] || []).forEach(id => allIds.add(id));
-      }
-      setSelectedIds(allIds);
-    },
-    onClearSelection: clearSelection,
-    onSave: () => { /* auto-saved, but prevent browser dialog */ },
-    onNavigateGraph: () => navigate('/graph'),
-  });
-
-  // ----- Column -----
   const handleUpdateColumn = (colKey, updates) => {
-    updateLocal(p => ({
-      ...p,
-      columns: p.columns.map(c => c.key === colKey ? { ...c, ...updates } : c)
-    }));
+    updateLocal(p => ({ ...p, columns: p.columns.map(c => c.key === colKey ? { ...c, ...updates } : c) }));
   };
   const handleAddColumn = () => {
-    if (!project) return;
-    if (project.columns.length >= MAX_COLUMNS) return;
+    if (!project || project.columns.length >= MAX_COLUMNS) return;
     const newKey = genColumnKey(project.columns.map(c => c.key));
-    const existingColors = project.columns.map(c => c.color);
-    const newColor = getNextColumnColor(themeId, existingColors);
-    const newLabel = t.columnDefaultName(project.columns.length + 1);
-    updateLocal(p => ({
-      ...p,
-      columns: [...p.columns, { key: newKey, label: newLabel, color: newColor }],
-      structure: { ...p.structure, [newKey]: [] }
-    }));
+    const newColor = getNextColumnColor(themeId, project.columns.map(c => c.color));
+    updateLocal(p => ({ ...p, columns: [...p.columns, { key: newKey, label: t.columnDefaultName(p.columns.length + 1), color: newColor }], structure: { ...p.structure, [newKey]: [] } }));
   };
   const handleRequestDeleteColumn = (colKey, name) => {
-    if (!project) return;
-    if (project.columns.length <= MIN_COLUMNS) return;
+    if (!project || project.columns.length <= MIN_COLUMNS) return;
     setPendingDelete({ type: 'column', colKey, name });
   };
-
-  // ----- Project -----
   const handleCreateProject = async (name) => {
-    const proj = await createNew(name);
-    if (proj) openTab(proj.id);
-    setShowNewProject(false);
+    const proj = await createNew(name); if (proj) openTab(proj.id); setShowNewProject(false);
   };
-  const handleOpenProject = (pid) => {
-    openTab(pid);
-    setShowProjectsList(false);
-  };
-  const handleDeleteProject = (pid, name) => {
-    setPendingDelete({ type: 'project', id: pid, name });
-    setShowProjectsList(false);
-  };
+  const handleOpenProject = (pid) => { openTab(pid); setShowProjectsList(false); };
+  const handleDeleteProject = (pid, name) => { setPendingDelete({ type: 'project', id: pid, name }); setShowProjectsList(false); };
   const handleExport = () => exportProjectAsMarkdown(project, metrics);
-  const handleExportColumn = (colKey, colLabel, colIndex) => {
-    exportColumnAsMarkdown(project, colKey, colLabel, colIndex);
-  };
 
-  // ================================================================
-  // Drag and drop
-  // ================================================================
-  const handleDragStart = ({ active }) => {
-    setActiveDragId(active.id);
-  };
-
-  const handleDragEnd = ({ active, over }) => {
-    setActiveDragId(null);
-    if (!over || !project) return;
-    const activeId = active.id;
-    if (activeId === over.id) return;
-
-    // Determine which nodes to move
-    const idsToMove = selectedIds.has(activeId) && selectedIds.size > 1
-      ? Array.from(selectedIds)
-      : [activeId];
-
-    // Determine destination
-    const overId = over.id;
-    let destColKey = null;
-    let destNodeId = null;
-
-    if (typeof overId === 'string' && overId.startsWith('col:')) {
-      destColKey = overId.slice(4);
-    } else {
-      destNodeId = overId;
-      destColKey = findColumnForNode(project, destNodeId);
+  // File import → create new project
+  const handleImport = async (data) => {
+    try {
+      const docRef = await addDoc(collection(db, 'projects'), {
+        name: `imported_${new Date().toLocaleDateString()}`,
+        columns: data.columns,
+        structure: data.structure,
+        ownerId: user.uid,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+      openTab(docRef.id);
+    } catch (err) {
+      console.error('Import project error:', err);
     }
-    if (!destColKey) return;
-
-    // Source column of the active node
-    const srcColKey = findColumnForNode(project, activeId);
-    if (!srcColKey) return;
-
-    updateLocal(p => {
-      // Gather subtrees being moved
-      // For multi-move we remove from each source column separately
-      const structure = { ...p.structure };
-      const collected = []; // [{node, sourceCol}]
-      const idsByCol = {};
-      for (const id of idsToMove) {
-        const col = findColumnForNode({ columns: p.columns, structure }, id);
-        if (!col) continue;
-        if (!idsByCol[col]) idsByCol[col] = [];
-        idsByCol[col].push(id);
-      }
-      for (const col of Object.keys(idsByCol)) {
-        const { tree, collected: gathered } = extractNodes(structure[col] || [], idsByCol[col]);
-        structure[col] = tree;
-        for (const node of gathered) collected.push(node);
-      }
-
-      // Insert at destination
-      const destTree = structure[destColKey] || [];
-      let newDestTree;
-      if (destNodeId) {
-        // Try to insert as a sibling BEFORE destNodeId (or at root if target removed by extraction)
-        const path = findPath(destTree, destNodeId);
-        if (path) {
-          // Insert collected one-by-one at path position, then shift for next ones
-          let tree = destTree;
-          let insertPath = path;
-          for (const n of collected) {
-            tree = insertAtPath(tree, insertPath, n);
-            // Advance insertPath by 1 at the same level so next insertion comes right after
-            insertPath = [...insertPath.slice(0, -1), insertPath[insertPath.length - 1] + 1];
-          }
-          newDestTree = tree;
-        } else {
-          // Target was removed (e.g. target was inside a moved subtree) — fall back to appending
-          newDestTree = [...destTree, ...collected];
-        }
-      } else {
-        // Dropped on empty column area
-        newDestTree = [...destTree, ...collected];
-      }
-      structure[destColKey] = newDestTree;
-
-      return { ...p, structure };
-    });
-
-    // Expand the moved subtrees so user can see them
-    setExpanded(prev => {
-      const next = new Set(prev);
-      for (const id of idsToMove) {
-        next.add(id);
-      }
-      return next;
-    });
-    clearSelection();
   };
 
-  // ----- Drag overlay preview (ghost) -----
-  const dragPreviewNode = useMemo(() => {
-    if (!activeDragId || !project) return null;
-    for (const col of project.columns) {
-      const n = findNodeInTree(project.structure[col.key] || [], activeDragId);
-      if (n) return { name: n.name, count: selectedIds.has(activeDragId) && selectedIds.size > 1 ? selectedIds.size : 1 };
-    }
-    return null;
-  }, [activeDragId, project, selectedIds]);
-
-  // ----- Render -----
-  if (projectsLoading || !tabsLoaded) {
-    return <LoadingSpinner />;
-  }
-
+  if (projectsLoading || !tabsLoaded) return <LoadingSpinner />;
   const monoCls = theme.fontMono ? 'font-mono-ui' : '';
 
   return (
-    <div
-      className={`min-h-screen ${theme.bg}`}
-      style={{ paddingBottom: dashSettings.position === 'bottom' ? '56px' : 0 }}
-    >
-      <DashboardBar
-        metrics={metrics}
-        saveStatus={saveStatus}
-        settings={dashSettings}
-        setSettings={setDashSettings}
-        onOpenSettings={() => setShowDashSettings(true)}
-      />
+    <div className={`min-h-screen ${theme.bg}`} style={{ paddingBottom: dashSettings.position === 'bottom' ? '56px' : 0 }}>
+      <DashboardBar metrics={metrics} saveStatus={saveStatus} settings={dashSettings} setSettings={setDashSettings} onOpenSettings={() => setShowDashSettings(true)} />
 
       <div className="max-w-[1600px] mx-auto p-3 sm:p-4">
         {/* Header */}
@@ -471,168 +173,56 @@ export default function EditorScreen() {
             <span className={`ml-2 text-xs ${theme.textMuted} hidden sm:inline`}>{t.appTagline}</span>
           </div>
           <div className="flex-1" />
-          {selectedIds.size > 0 && (
-            <button
-              onClick={clearSelection}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
-              title="clear selection"
-            >
-              {selectedIds.size} selected · clear
-            </button>
-          )}
-          <button
-            onClick={() => navigate('/graph')}
-            disabled={!project}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md disabled:opacity-40 ${monoCls} ${theme.button}`}
-            title="3D graph view"
-          >
+
+          <FileToolbar project={project} onImport={handleImport} />
+
+          <button onClick={() => navigate('/graph')} disabled={!project}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md disabled:opacity-40 ${monoCls} ${theme.button}`} title="City view">
             <Box size={14} /> graph
           </button>
-          <button
-            onClick={() => setShowShortcuts(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
-            title={themeId === 'sand' ? '단축키' : 'Shortcuts'}
-          >
-            <Keyboard size={14} />
-          </button>
-          <button
-            onClick={() => setShowAppearance(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
-            title={t.appearance}
-          >
+          <button onClick={() => setShowAppearance(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`} title={t.appearance}>
             <Palette size={14} />
           </button>
-          <button
-            onClick={() => setShowProjectsList(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
-          >
+          <button onClick={() => setShowProjectsList(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}>
             <FolderOpen size={14} /> {t.projectList}
           </button>
-          <button
-            onClick={handleExport}
-            disabled={!project}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md disabled:opacity-40 ${monoCls} ${theme.buttonPrimary}`}
-          >
-            <FileDown size={14} /> {t.export}
-          </button>
-          <button
-            onClick={logout}
-            className={`px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}
-          >
+          <button onClick={logout}
+            className={`px-2.5 py-1.5 text-xs font-medium border rounded-md ${monoCls} ${theme.button}`}>
             {t.logout}
           </button>
         </div>
 
-        <TabBar
-          openIds={openIds}
-          projectsList={projects}
-          activeId={activeId}
-          onSwitch={switchTab}
-          onClose={closeTab}
-          onNew={() => setShowNewProject(true)}
-        />
-
+        <TabBar openIds={openIds} projectsList={projects} activeId={activeId} onSwitch={switchTab} onClose={closeTab} onNew={() => setShowNewProject(true)} />
         <ClipboardBanner clipboard={clipboard} onClear={clearClipboard} />
 
         {!project ? (
-          projLoading ? (
-            <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>{t.loadingProject}</div>
-          ) : (
-            <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>{t.selectOrCreate}</div>
-          )
+          <div className={`p-10 text-center ${theme.textDim} text-sm ${monoCls}`}>
+            {projLoading ? t.loadingProject : t.selectOrCreate}
+          </div>
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={pointerWithin}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {project.columns.map((col, colIdx) => (
-                <Column
-                  key={col.key}
-                  column={col}
-                  columnIndex={colIdx}
-                  items={project.structure[col.key] || []}
-                  expandedIds={expanded}
-                  selectedIds={selectedIds}
-                  onUpdateColumn={handleUpdateColumn}
-                  onRequestDeleteColumn={handleRequestDeleteColumn}
-                  onAddRoot={handleAddRoot}
-                  onPasteToRoot={handlePasteToRoot}
-                  hasClipboard={!!clipboard}
-                  onToggleExpand={handleToggleExpand}
-                  onUpdateNode={handleUpdateNode}
-                  onToggleTag={handleToggleTag}
-                  onAddChild={handleAddChild}
-                  onCopy={handleCopy}
-                  onPasteAsChild={handlePasteAsChild}
-                  onRequestDelete={handleRequestDelete}
-                  onToggleSelect={handleToggleSelect}
-                  onOutdent={handleOutdent}
-                  onIndent={handleIndent}
-                  onMoveUp={handleMoveUp}
-                  onMoveDown={handleMoveDown}
-                  onExportColumn={handleExportColumn}
-                />
-              ))}
-              {project.columns.length < MAX_COLUMNS && (
-                <AddColumnCard onAdd={handleAddColumn} />
-              )}
-            </div>
-
-            <DragOverlay>
-              {dragPreviewNode ? (
-                <div className={`${theme.bgPanel} border ${theme.borderStrong} rounded shadow-lg px-3 py-2 ${monoCls}`}>
-                  <div className={`text-xs font-bold ${theme.text}`}>
-                    &gt; {dragPreviewNode.name}
-                  </div>
-                  {dragPreviewNode.count > 1 && (
-                    <div className={`text-[10px] ${theme.textMuted}`}>
-                      + {dragPreviewNode.count - 1} more
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {project.columns.map(col => (
+              <Column key={col.key} column={col} items={project.structure[col.key] || []} expanded={expanded}
+                onUpdateColumn={handleUpdateColumn} onRequestDeleteColumn={handleRequestDeleteColumn}
+                onAddRoot={handleAddRoot} onPasteToRoot={handlePasteToRoot} hasClipboard={!!clipboard}
+                onToggleExpand={handleToggleExpand} onUpdateNode={handleUpdateNode} onToggleTag={handleToggleTag}
+                onAddChild={handleAddChild} onCopy={handleCopy} onPasteAsChild={handlePasteAsChild}
+                onRequestDelete={handleRequestDelete} />
+            ))}
+            {project.columns.length < MAX_COLUMNS && <AddColumnCard onAdd={handleAddColumn} />}
+          </div>
         )}
       </div>
 
-      <DeleteModal
-        pendingDelete={pendingDelete}
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setPendingDelete(null)}
-      />
-      <NewProjectDialog
-        open={showNewProject}
-        onCancel={() => setShowNewProject(false)}
-        onCreate={handleCreateProject}
-      />
-      <ProjectsListModal
-        open={showProjectsList}
-        projects={projects}
-        openIds={openIds}
-        onClose={() => setShowProjectsList(false)}
-        onOpen={handleOpenProject}
-        onRename={rename}
-        onDelete={handleDeleteProject}
-        onNew={() => { setShowProjectsList(false); setShowNewProject(true); }}
-      />
-      <DashboardSettings
-        open={showDashSettings}
-        settings={dashSettings}
-        setSettings={setDashSettings}
-        onClose={() => setShowDashSettings(false)}
-      />
-      <AppearanceSettings
-        open={showAppearance}
-        onClose={() => setShowAppearance(false)}
-      />
-      <ShortcutsHelp
-        open={showShortcuts}
-        onClose={() => setShowShortcuts(false)}
-      />
+      <DeleteModal pendingDelete={pendingDelete} onConfirm={handleConfirmDelete} onCancel={() => setPendingDelete(null)} />
+      <NewProjectDialog open={showNewProject} onCancel={() => setShowNewProject(false)} onCreate={handleCreateProject} />
+      <ProjectsListModal open={showProjectsList} projects={projects} openIds={openIds} onClose={() => setShowProjectsList(false)}
+        onOpen={handleOpenProject} onRename={rename} onDelete={handleDeleteProject}
+        onNew={() => { setShowProjectsList(false); setShowNewProject(true); }} />
+      <DashboardSettings open={showDashSettings} settings={dashSettings} setSettings={setDashSettings} onClose={() => setShowDashSettings(false)} />
+      <AppearanceSettings open={showAppearance} onClose={() => setShowAppearance(false)} />
     </div>
   );
 }
