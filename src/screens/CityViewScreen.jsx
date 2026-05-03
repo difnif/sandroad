@@ -1,6 +1,6 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Edit3 } from 'lucide-react';
+import { Edit3, Undo2, Redo2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useActions, ACTION_TYPES } from '../contexts/ActionContext.jsx';
@@ -8,7 +8,7 @@ import { useProjectsList } from '../hooks/useProjectsList.js';
 import { useProjectData } from '../hooks/useProjectData.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { updateInTree } from '../utils/treeOps.js';
-import { createRoad, addRoad, removeRoad, VEHICLE_INFO } from '../utils/cityRoads.js';
+import { createRoad, addRoad, removeRoad, updateRoad, generateRoadsFromTree, VEHICLE_INFO } from '../utils/cityRoads.js';
 import CityCanvas from '../components/city/CityCanvas.jsx';
 import ActionTimeline from '../components/graph/ActionTimeline.jsx';
 import ConsultBar from '../components/graph/ConsultBar.jsx';
@@ -21,23 +21,100 @@ export default function CityViewScreen() {
   const { projects, loading: projectsLoading } = useProjectsList();
   const { openIds, activeId, loaded: tabsLoaded } = useTabs(projects);
   const { project, loading: projLoading, updateLocal } = useProjectData(activeId);
-  const { record } = useActions();
+  const { record, undo: actionUndo, redo: actionRedo, canUndo, canRedo } = useActions();
 
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedRoadId, setSelectedRoadId] = useState(null);
   const [inlineEditId, setInlineEditId] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState('');
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [consultCollapsed, setConsultCollapsed] = useState(true);
   const [chatMessages, setChatMessages] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [paused, setPaused] = useState(false);
   const inlineInputRef = useRef(null);
+  const autoRoadsGenerated = useRef(false);
+
+  // Undo stack (project snapshots)
+  const undoStack = useRef([]);
+  const redoStack = useRef([]);
 
   const monoCls = theme.fontMono ? 'font-mono-ui' : '';
   const lang = themeId === 'sand' ? 'ko' : 'en';
 
   const roads = project?.roads || [];
 
-  // Find node across all columns
+  // Auto-generate roads on first entry
+  useEffect(() => {
+    if (!project || autoRoadsGenerated.current) return;
+    if (project.roads && project.roads.length > 0) { autoRoadsGenerated.current = true; return; }
+    // Check if there are items to generate roads from
+    const hasItems = project.columns?.some(c => (project.structure[c.key] || []).length > 0);
+    if (!hasItems) return;
+    autoRoadsGenerated.current = true;
+    const generatedRoads = generateRoadsFromTree(project);
+    if (generatedRoads.length > 0) {
+      updateLocal(p => ({ ...p, roads: generatedRoads }));
+    }
+  }, [project]);
+
+  // Reset auto-roads flag when project changes
+  useEffect(() => { autoRoadsGenerated.current = false; }, [activeId]);
+
+  // Space bar pause
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.code === 'Space' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault();
+        setPaused(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Ctrl+Z / Ctrl+Y
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.ctrlKey && e.key === 'z' && undoStack.current.length > 0) {
+        e.preventDefault();
+        handleUndo();
+      }
+      if (e.ctrlKey && e.key === 'y' && redoStack.current.length > 0) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [project]);
+
+  // Save snapshot before mutation
+  const saveSnapshot = () => {
+    if (project) {
+      undoStack.current.push(JSON.stringify({ structure: project.structure, roads: project.roads }));
+      if (undoStack.current.length > 30) undoStack.current.shift();
+      redoStack.current = [];
+    }
+  };
+
+  const handleUndo = () => {
+    if (undoStack.current.length === 0) return;
+    redoStack.current.push(JSON.stringify({ structure: project.structure, roads: project.roads }));
+    const prev = JSON.parse(undoStack.current.pop());
+    updateLocal(p => ({ ...p, ...prev }));
+    actionUndo();
+  };
+
+  const handleRedo = () => {
+    if (redoStack.current.length === 0) return;
+    undoStack.current.push(JSON.stringify({ structure: project.structure, roads: project.roads }));
+    const next = JSON.parse(redoStack.current.pop());
+    updateLocal(p => ({ ...p, ...next }));
+    actionRedo();
+  };
+
+  // Find node
   const findNode = (nodeId) => {
     if (!project) return null;
     for (const col of project.columns || []) {
@@ -47,24 +124,15 @@ export default function CityViewScreen() {
     return null;
   };
 
-  // Selected node info
-  const selectedNode = useMemo(() => {
-    if (!selectedId) return null;
-    return findNode(selectedId);
-  }, [selectedId, project]);
+  const selectedNode = useMemo(() => selectedId ? findNode(selectedId) : null, [selectedId, project]);
+  const selectedRoad = useMemo(() => selectedRoadId ? roads.find(r => r.id === selectedRoadId) : null, [selectedRoadId, roads]);
+  const selectedNodeRoads = useMemo(() => selectedId ? roads.filter(r => r.from === selectedId || r.to === selectedId) : [], [selectedId, roads]);
 
-  // Connected roads for selected node
-  const selectedRoads = useMemo(() => {
-    if (!selectedId) return [];
-    return roads.filter(r => r.from === selectedId || r.to === selectedId);
-  }, [selectedId, roads]);
-
-  // --- Handlers ---
+  // Inline edit
   const handleRequestInlineEdit = (nodeId) => {
     const node = findNode(nodeId);
     if (!node) return;
-    setInlineEditId(nodeId);
-    setInlineEditValue(node.name || '');
+    setInlineEditId(nodeId); setInlineEditValue(node.name || '');
     setTimeout(() => inlineInputRef.current?.focus(), 50);
   };
 
@@ -74,80 +142,55 @@ export default function CityViewScreen() {
     if (!node) { setInlineEditId(null); return; }
     const newName = inlineEditValue.trim() || node.name;
     if (newName !== node.name) {
-      updateLocal(p => ({
-        ...p,
-        structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], inlineEditId, { name: newName }) }
-      }));
+      saveSnapshot();
+      updateLocal(p => ({ ...p, structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], inlineEditId, { name: newName }) } }));
       record(ACTION_TYPES.RENAME, { nodeId: inlineEditId, from: node.name, to: newName });
     }
     setInlineEditId(null);
   };
 
-  // Position confirm (existing items)
+  // Position confirm
   const handlePositionConfirm = (itemId, pos) => {
-    const node = findNode(itemId);
-    if (!node) return;
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], itemId, { cityPos: pos }) }
-    }));
+    const node = findNode(itemId); if (!node) return;
+    saveSnapshot();
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], itemId, { cityPos: pos }) } }));
     record(ACTION_TYPES.MOVE, { nodeId: itemId, nodeName: node.name, to: pos });
   };
 
-  // Place unplaced item
+  // Place unplaced
   const handlePlaceItem = (itemId, pos) => {
-    const node = findNode(itemId);
-    if (!node) return;
-    updateLocal(p => ({
-      ...p,
-      structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], itemId, { placed: true, cityPos: pos }) }
-    }));
+    const node = findNode(itemId); if (!node) return;
+    saveSnapshot();
+    updateLocal(p => ({ ...p, structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], itemId, { placed: true, cityPos: pos }) } }));
     record(ACTION_TYPES.ADD, { nodeId: itemId, nodeName: node.name, colLabel: node.col });
   };
 
-  // Road creation
+  // Road CRUD
   const handleRoadCreate = (fromId, toId, type, vehicle) => {
-    const fromNode = findNode(fromId);
-    const toNode = findNode(toId);
+    saveSnapshot();
     const road = createRoad(fromId, toId, type, vehicle);
-    updateLocal(p => ({
-      ...p,
-      roads: addRoad(p.roads, road)
-    }));
-    record(ACTION_TYPES.CONNECT, {
-      fromName: fromNode?.name || fromId,
-      toName: toNode?.name || toId,
-      roadType: type,
-      vehicle
-    });
+    updateLocal(p => ({ ...p, roads: addRoad(p.roads, road) }));
+    const fn = findNode(fromId), tn = findNode(toId);
+    record(ACTION_TYPES.CONNECT, { fromName: fn?.name || fromId, toName: tn?.name || toId, roadType: type, vehicle });
   };
 
-  // Road deletion
   const handleRoadDelete = (roadId) => {
+    saveSnapshot();
     const road = roads.find(r => r.id === roadId);
-    updateLocal(p => ({
-      ...p,
-      roads: removeRoad(p.roads, roadId)
-    }));
+    updateLocal(p => ({ ...p, roads: removeRoad(p.roads, roadId) }));
     if (road) {
-      const fromNode = findNode(road.from);
-      const toNode = findNode(road.to);
-      record(ACTION_TYPES.DISCONNECT, {
-        fromName: fromNode?.name || road.from,
-        toName: toNode?.name || road.to
-      });
+      const fn = findNode(road.from), tn = findNode(road.to);
+      record(ACTION_TYPES.DISCONNECT, { fromName: fn?.name || road.from, toName: tn?.name || road.to });
     }
+    if (selectedRoadId === roadId) setSelectedRoadId(null);
   };
 
-  // Chat placeholder
+  // Chat
   const handleSendMessage = (text) => {
     setChatMessages(prev => [...prev, { role: 'user', content: text }]);
     setAiLoading(true);
     setTimeout(() => {
-      setChatMessages(prev => [...prev, {
-        role: 'assistant',
-        content: lang === 'ko' ? `요청 확인: "${text}"\nClaude API 연동 후 사용 가능.` : `Received: "${text}"\nAvailable after API setup.`
-      }]);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: lang === 'ko' ? `요청 확인: "${text}"\nClaude API 연동 후 사용 가능.` : `Received: "${text}"` }]);
       setAiLoading(false);
     }, 1000);
   };
@@ -163,7 +206,25 @@ export default function CityViewScreen() {
           <span className="text-sm font-bold">sandroad</span>
           <span className={`text-[10px] ${theme.textMuted}`}>city view</span>
         </div>
-        {project && <span className={`text-xs ${theme.textMuted} ${monoCls} ml-2 truncate max-w-[160px]`}>· {project.name}</span>}
+        {project && <span className={`text-xs ${theme.textMuted} ${monoCls} ml-2 truncate max-w-[120px]`}>· {project.name}</span>}
+
+        {/* Undo/Redo */}
+        <button onClick={handleUndo} disabled={undoStack.current.length === 0}
+          className={`p-1 rounded ${theme.textMuted} disabled:opacity-30`} title="Undo (Ctrl+Z)">
+          <Undo2 size={14} />
+        </button>
+        <button onClick={handleRedo} disabled={redoStack.current.length === 0}
+          className={`p-1 rounded ${theme.textMuted} disabled:opacity-30`} title="Redo (Ctrl+Y)">
+          <Redo2 size={14} />
+        </button>
+
+        {/* Pause indicator */}
+        {paused && (
+          <span className={`text-[10px] px-2 py-0.5 rounded bg-red-500 text-white font-bold ${monoCls}`}>
+            ⏸ {lang === 'ko' ? '정지' : 'PAUSED'}
+          </span>
+        )}
+
         <div className="flex-1" />
         <button onClick={() => navigate('/')} className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded ${monoCls} ${theme.button}`}>
           <Edit3 size={12} /> editor
@@ -173,7 +234,7 @@ export default function CityViewScreen() {
         </button>
       </div>
 
-      {/* City canvas */}
+      {/* City */}
       <div className="flex-1 relative overflow-hidden">
         {!project ? (
           <div className={`absolute inset-0 flex items-center justify-center text-sm ${theme.textDim} ${monoCls}`}>
@@ -186,72 +247,78 @@ export default function CityViewScreen() {
         ) : (
           <>
             <CityCanvas
-              project={project}
-              themeId={themeId}
-              selectedId={selectedId}
-              onSelectNode={setSelectedId}
+              project={project} themeId={themeId}
+              selectedId={selectedId} onSelectNode={setSelectedId}
               onRequestInlineEdit={handleRequestInlineEdit}
               onPositionConfirm={handlePositionConfirm}
-              roads={roads}
-              onRoadCreate={handleRoadCreate}
-              onRoadDelete={handleRoadDelete}
-              onPlaceItem={handlePlaceItem}
+              roads={roads} onRoadCreate={handleRoadCreate}
+              onRoadDelete={handleRoadDelete} onPlaceItem={handlePlaceItem}
+              onRoadSelect={setSelectedRoadId} selectedRoadId={selectedRoadId}
+              paused={paused}
             />
 
-            {/* Selected info panel */}
+            {/* Selected node panel */}
             {selectedNode && (
-              <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[300px] z-10`}>
+              <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[280px] z-10`}>
                 <div className={`font-bold ${theme.text} text-sm`}>{selectedNode.name}</div>
                 <div className={`text-[10px] ${theme.textMuted} mt-0.5`}>
                   {selectedNode.children?.length ? `${selectedNode.children.length} children` : 'leaf'}
                 </div>
-                {selectedNode.description && (
-                  <div className={`mt-1 pt-1 border-t ${theme.border} ${theme.textMuted}`}>{selectedNode.description}</div>
-                )}
-
-                {/* Connected roads */}
-                {selectedRoads.length > 0 && (
+                {selectedNodeRoads.length > 0 && (
                   <div className={`mt-2 pt-2 border-t ${theme.border}`}>
                     <div className={`text-[9px] font-bold ${theme.text} mb-1`}>
-                      {lang === 'ko' ? `도로 (${selectedRoads.length})` : `Roads (${selectedRoads.length})`}
+                      {lang === 'ko' ? `도로 (${selectedNodeRoads.length})` : `Roads (${selectedNodeRoads.length})`}
                     </div>
-                    {selectedRoads.map(road => {
+                    {selectedNodeRoads.map(road => {
                       const otherId = road.from === selectedId ? road.to : road.from;
                       const other = findNode(otherId);
                       const vi = VEHICLE_INFO[road.vehicle] || VEHICLE_INFO.car;
                       return (
                         <div key={road.id} className="flex items-center gap-1 mb-0.5">
                           <span>{vi.emoji}</span>
-                          <span className={`text-[10px] ${theme.text} flex-1`}>
-                            → {other?.name || otherId}
-                          </span>
-                          <button
-                            onClick={() => handleRoadDelete(road.id)}
-                            className="text-[9px] text-red-400 hover:text-red-600"
-                          >
-                            ✗
-                          </button>
+                          <span className={`text-[10px] ${theme.text} flex-1 truncate`}>→ {other?.name || '?'}</span>
+                          <button onClick={() => handleRoadDelete(road.id)} className="text-[9px] text-red-400 hover:text-red-600">✗</button>
                         </div>
                       );
                     })}
                   </div>
                 )}
-
                 <div className="mt-2 flex gap-1">
                   <button onClick={() => handleRequestInlineEdit(selectedId)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
-                    {lang === 'ko' ? '이름 수정' : 'Edit'}
+                    {lang === 'ko' ? '수정' : 'Edit'}
                   </button>
                   <button onClick={() => navigate('/')} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
                     {lang === 'ko' ? '에디터' : 'Editor'}
                   </button>
-                  <button onClick={() => setSelectedId(null)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
-                    ✗
-                  </button>
+                  <button onClick={() => setSelectedId(null)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>✗</button>
                 </div>
               </div>
             )}
 
-            {/* Inline edit modal */}
+            {/* Selected road panel */}
+            {selectedRoad && !selectedNode && (
+              <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[280px] z-10`}>
+                <div className={`font-bold ${theme.text} text-sm`}>
+                  {VEHICLE_INFO[selectedRoad.vehicle]?.emoji} {lang === 'ko' ? '도로' : 'Road'}
+                </div>
+                <div className={`text-[10px] ${theme.textMuted} mt-1`}>
+                  {findNode(selectedRoad.from)?.name || '?'} → {findNode(selectedRoad.to)?.name || '?'}
+                </div>
+                <div className={`text-[10px] ${theme.textMuted} mt-0.5`}>
+                  {lang === 'ko'
+                    ? `${VEHICLE_INFO[selectedRoad.vehicle]?.desc_ko || ''}`
+                    : `${VEHICLE_INFO[selectedRoad.vehicle]?.desc_en || ''}`}
+                </div>
+                <div className="mt-2 flex gap-1">
+                  <button onClick={() => handleRoadDelete(selectedRoad.id)} className={`px-2 py-1 text-[10px] rounded bg-red-500 text-white`}>
+                    {lang === 'ko' ? '삭제' : 'Delete'}
+                  </button>
+                  <button onClick={() => setSelectedRoadId(null)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>✗</button>
+                </div>
+              </div>
+            )}
+
+            {/* Inline edit */}
             {inlineEditId && (
               <div className="absolute inset-0 flex items-center justify-center z-30" onClick={() => setInlineEditId(null)}>
                 <div className={`${theme.bgPanel} border-2 ${theme.borderStrong} rounded-lg shadow-xl p-4 w-[90vw] max-w-sm`} onClick={e => e.stopPropagation()}>
