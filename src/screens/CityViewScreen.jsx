@@ -66,6 +66,24 @@ export default function CityViewScreen() {
     setInlineEditId(null);
   };
 
+  const handlePositionConfirm = (itemId, pos) => {
+    if (!project) return;
+    const node = findNode(itemId);
+    if (!node) return;
+    updateLocal(p => ({
+      ...p,
+      structure: {
+        ...p.structure,
+        [node.col]: updateInTree(p.structure[node.col] || [], itemId, { cityPos: pos })
+      }
+    }));
+    record(ACTION_TYPES.MOVE, {
+      nodeId: itemId,
+      nodeName: node.name || itemId,
+      to: pos
+    });
+  };
+
   const handleSendMessage = (text) => {
     setChatMessages(prev => [...prev, { role: 'user', content: text }]);
     setAiLoading(true);
@@ -118,6 +136,7 @@ export default function CityViewScreen() {
               selectedId={selectedId}
               onSelectNode={setSelectedId}
               onRequestInlineEdit={handleRequestInlineEdit}
+              onPositionConfirm={handlePositionConfirm}
             />
 
             {/* Selected info */}
