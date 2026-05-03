@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Edit3 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext.jsx';
@@ -8,6 +8,7 @@ import { useProjectsList } from '../hooks/useProjectsList.js';
 import { useProjectData } from '../hooks/useProjectData.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { updateInTree } from '../utils/treeOps.js';
+import { createRoad, addRoad, removeRoad, VEHICLE_INFO } from '../utils/cityRoads.js';
 import CityCanvas from '../components/city/CityCanvas.jsx';
 import ActionTimeline from '../components/graph/ActionTimeline.jsx';
 import ConsultBar from '../components/graph/ConsultBar.jsx';
@@ -34,6 +35,9 @@ export default function CityViewScreen() {
   const monoCls = theme.fontMono ? 'font-mono-ui' : '';
   const lang = themeId === 'sand' ? 'ko' : 'en';
 
+  const roads = project?.roads || [];
+
+  // Find node across all columns
   const findNode = (nodeId) => {
     if (!project) return null;
     for (const col of project.columns || []) {
@@ -43,6 +47,19 @@ export default function CityViewScreen() {
     return null;
   };
 
+  // Selected node info
+  const selectedNode = useMemo(() => {
+    if (!selectedId) return null;
+    return findNode(selectedId);
+  }, [selectedId, project]);
+
+  // Connected roads for selected node
+  const selectedRoads = useMemo(() => {
+    if (!selectedId) return [];
+    return roads.filter(r => r.from === selectedId || r.to === selectedId);
+  }, [selectedId, roads]);
+
+  // --- Handlers ---
   const handleRequestInlineEdit = (nodeId) => {
     const node = findNode(nodeId);
     if (!node) return;
@@ -66,24 +83,63 @@ export default function CityViewScreen() {
     setInlineEditId(null);
   };
 
+  // Position confirm (existing items)
   const handlePositionConfirm = (itemId, pos) => {
-    if (!project) return;
     const node = findNode(itemId);
     if (!node) return;
     updateLocal(p => ({
       ...p,
-      structure: {
-        ...p.structure,
-        [node.col]: updateInTree(p.structure[node.col] || [], itemId, { cityPos: pos })
-      }
+      structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], itemId, { cityPos: pos }) }
     }));
-    record(ACTION_TYPES.MOVE, {
-      nodeId: itemId,
-      nodeName: node.name || itemId,
-      to: pos
+    record(ACTION_TYPES.MOVE, { nodeId: itemId, nodeName: node.name, to: pos });
+  };
+
+  // Place unplaced item
+  const handlePlaceItem = (itemId, pos) => {
+    const node = findNode(itemId);
+    if (!node) return;
+    updateLocal(p => ({
+      ...p,
+      structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], itemId, { placed: true, cityPos: pos }) }
+    }));
+    record(ACTION_TYPES.ADD, { nodeId: itemId, nodeName: node.name, colLabel: node.col });
+  };
+
+  // Road creation
+  const handleRoadCreate = (fromId, toId, type, vehicle) => {
+    const fromNode = findNode(fromId);
+    const toNode = findNode(toId);
+    const road = createRoad(fromId, toId, type, vehicle);
+    updateLocal(p => ({
+      ...p,
+      roads: addRoad(p.roads, road)
+    }));
+    record(ACTION_TYPES.CONNECT, {
+      fromName: fromNode?.name || fromId,
+      toName: toNode?.name || toId,
+      roadType: type,
+      vehicle
     });
   };
 
+  // Road deletion
+  const handleRoadDelete = (roadId) => {
+    const road = roads.find(r => r.id === roadId);
+    updateLocal(p => ({
+      ...p,
+      roads: removeRoad(p.roads, roadId)
+    }));
+    if (road) {
+      const fromNode = findNode(road.from);
+      const toNode = findNode(road.to);
+      record(ACTION_TYPES.DISCONNECT, {
+        fromName: fromNode?.name || road.from,
+        toName: toNode?.name || road.to
+      });
+    }
+  };
+
+  // Chat placeholder
   const handleSendMessage = (text) => {
     setChatMessages(prev => [...prev, { role: 'user', content: text }]);
     setAiLoading(true);
@@ -97,7 +153,6 @@ export default function CityViewScreen() {
   };
 
   if (projectsLoading || !tabsLoaded) return <LoadingSpinner />;
-
   const hasItems = project && project.columns?.some(c => (project.structure[c.key] || []).length > 0);
 
   return (
@@ -137,30 +192,64 @@ export default function CityViewScreen() {
               onSelectNode={setSelectedId}
               onRequestInlineEdit={handleRequestInlineEdit}
               onPositionConfirm={handlePositionConfirm}
+              roads={roads}
+              onRoadCreate={handleRoadCreate}
+              onRoadDelete={handleRoadDelete}
+              onPlaceItem={handlePlaceItem}
             />
 
-            {/* Selected info */}
-            {selectedId && (() => {
-              const node = findNode(selectedId);
-              if (!node) return null;
-              return (
-                <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[280px]`}>
-                  <div className={`font-bold ${theme.text}`}>{node.name}</div>
-                  <div className={`text-[10px] ${theme.textMuted} mt-0.5`}>
-                    {node.children?.length ? `${node.children.length} children` : 'leaf'}
-                  </div>
-                  {node.description && <div className={`mt-1 pt-1 border-t ${theme.border} ${theme.textMuted}`}>{node.description}</div>}
-                  <div className="mt-2 flex gap-1">
-                    <button onClick={() => handleRequestInlineEdit(selectedId)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
-                      {lang === 'ko' ? '이름 수정' : 'Edit name'}
-                    </button>
-                    <button onClick={() => navigate('/')} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
-                      {lang === 'ko' ? '에디터에서 보기' : 'View in editor'}
-                    </button>
-                  </div>
+            {/* Selected info panel */}
+            {selectedNode && (
+              <div className={`absolute bottom-14 left-3 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-lg p-3 text-xs ${monoCls} max-w-[300px] z-10`}>
+                <div className={`font-bold ${theme.text} text-sm`}>{selectedNode.name}</div>
+                <div className={`text-[10px] ${theme.textMuted} mt-0.5`}>
+                  {selectedNode.children?.length ? `${selectedNode.children.length} children` : 'leaf'}
                 </div>
-              );
-            })()}
+                {selectedNode.description && (
+                  <div className={`mt-1 pt-1 border-t ${theme.border} ${theme.textMuted}`}>{selectedNode.description}</div>
+                )}
+
+                {/* Connected roads */}
+                {selectedRoads.length > 0 && (
+                  <div className={`mt-2 pt-2 border-t ${theme.border}`}>
+                    <div className={`text-[9px] font-bold ${theme.text} mb-1`}>
+                      {lang === 'ko' ? `도로 (${selectedRoads.length})` : `Roads (${selectedRoads.length})`}
+                    </div>
+                    {selectedRoads.map(road => {
+                      const otherId = road.from === selectedId ? road.to : road.from;
+                      const other = findNode(otherId);
+                      const vi = VEHICLE_INFO[road.vehicle] || VEHICLE_INFO.car;
+                      return (
+                        <div key={road.id} className="flex items-center gap-1 mb-0.5">
+                          <span>{vi.emoji}</span>
+                          <span className={`text-[10px] ${theme.text} flex-1`}>
+                            → {other?.name || otherId}
+                          </span>
+                          <button
+                            onClick={() => handleRoadDelete(road.id)}
+                            className="text-[9px] text-red-400 hover:text-red-600"
+                          >
+                            ✗
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="mt-2 flex gap-1">
+                  <button onClick={() => handleRequestInlineEdit(selectedId)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
+                    {lang === 'ko' ? '이름 수정' : 'Edit'}
+                  </button>
+                  <button onClick={() => navigate('/')} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
+                    {lang === 'ko' ? '에디터' : 'Editor'}
+                  </button>
+                  <button onClick={() => setSelectedId(null)} className={`px-2 py-1 text-[10px] rounded ${theme.button}`}>
+                    ✗
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Inline edit modal */}
             {inlineEditId && (
@@ -193,10 +282,7 @@ export default function CityViewScreen() {
 function findInTree(nodes, id) {
   for (const n of nodes) {
     if (n.id === id) return n;
-    if (n.children) {
-      const found = findInTree(n.children, id);
-      if (found) return found;
-    }
+    if (n.children) { const f = findInTree(n.children, id); if (f) return f; }
   }
   return null;
 }
