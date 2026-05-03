@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { computeCityLayout, getDistrictColor } from '../../utils/cityLayout.js';
-import { VEHICLE_INFO, ROAD_TYPES, createVehicleAnimState } from '../../utils/cityRoads.js';
+import { VEHICLE_TYPES, ROAD_TYPES, DATA_TYPES, createVehicleAnimState } from '../../utils/cityRoads.js';
+import { BUILDING_TYPES, getBuildingType } from '../../constants/unitTypes.js';
 import { formatColumnNumber } from '../../utils/numbering.js';
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 
@@ -244,7 +245,7 @@ export default function CityCanvas({
         anim.x = vx; anim.y = vy;
         anim.movingRight = (anim.direction > 0) ? (tx > fx) : (fx > tx);
 
-        const info = VEHICLE_INFO[anim.vehicle] || VEHICLE_INFO.car;
+        const info = VEHICLE_TYPES[anim.vehicle] || VEHICLE_TYPES.car;
         const isHovered = hoveredVehicle?.roadId === anim.roadId;
 
         ctx.save();
@@ -264,10 +265,11 @@ export default function CityCanvas({
 
       // Vehicle tooltip
       if (hoveredVehicle) {
-        const info = VEHICLE_INFO[hoveredVehicle.vehicle] || VEHICLE_INFO.car;
+        const info = VEHICLE_TYPES[hoveredVehicle.vehicle] || VEHICLE_TYPES.car;
+        const dt = DATA_TYPES[hoveredVehicle.dataType] || DATA_TYPES.content;
         const fromItem = itemMap[hoveredVehicle.from];
         const toItem = itemMap[hoveredVehicle.to];
-        const label = `${info.emoji} ${lang === 'ko' ? info.label_ko : info.label_en}: ${fromItem?.name || '?'} → ${toItem?.name || '?'}`;
+        const label = `${info.emoji}${dt.emoji} ${fromItem?.name || '?'} → ${toItem?.name || '?'}`;
 
         const tx = hoveredVehicle.x, ty = hoveredVehicle.y - 20;
         ctx.font = '10px monospace';
@@ -340,7 +342,7 @@ export default function CityCanvas({
 
     // Vehicle hover
     const vh = hitTestVehicle(world.x, world.y);
-    setHoveredVehicle(vh ? { roadId: vh.roadId, x: vh.x, y: vh.y, vehicle: vh.vehicle, from: vh.from, to: vh.to } : null);
+    setHoveredVehicle(vh ? { roadId: vh.roadId, x: vh.x, y: vh.y, vehicle: vh.vehicle, dataType: vh.dataType, from: vh.from, to: vh.to } : null);
 
     // Road hover
     if (!vh) {
@@ -440,7 +442,7 @@ export default function CityCanvas({
               ))}
             </div>
             <div className="flex gap-1">
-              {Object.entries(VEHICLE_INFO).map(([k, v]) => (
+              {Object.entries(VEHICLE_TYPES).map(([k, v]) => (
                 <button key={k} onClick={() => setRoadVehicle(k)}
                   className={`px-2 py-0.5 text-[9px] rounded border ${monoCls} ${roadVehicle === k ? theme.buttonPrimary : theme.button}`}>
                   {v.emoji}
@@ -512,9 +514,54 @@ function drawGrid(ctx, vs, cs, t, snap) {
 }
 function drawDistrict(ctx, d, c, r) { ctx.fillStyle = c.fill; ctx.strokeStyle = c.border; ctx.lineWidth = 3; roundedRect(ctx, d.x, d.y, d.width, d.height, 12); ctx.fill(); ctx.stroke(); ctx.fillStyle = c.text; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(`${r}. ${d.label}`, d.x+16, d.y+10); }
 function drawLand(ctx, l, c, sel, hov) { if (hov||sel) { ctx.shadowColor = sel ? 'rgba(245,158,11,0.4)' : 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; } ctx.fillStyle = c.landFill; ctx.strokeStyle = sel ? '#f59e0b' : c.border; ctx.lineWidth = sel ? 2.5 : 1.5; ctx.setLineDash([6,3]); roundedRect(ctx, l.x, l.y, l.w, l.h, 8); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.fillStyle = c.text; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(`[L${l.depth}] ${l.name||''}`, l.x+8, l.y+6); }
-function drawBuilding(ctx, b, c, sel, hov) { ctx.shadowColor = hov ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.1)'; ctx.shadowBlur = hov ? 6 : 3; ctx.shadowOffsetY = hov ? 3 : 1; ctx.fillStyle = sel ? '#fef3c7' : c.bldFill; ctx.strokeStyle = sel ? '#f59e0b' : c.border; ctx.lineWidth = sel ? 2 : 1; roundedRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill(); ctx.stroke(); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.fillStyle = c.border; roundedRect(ctx, b.x, b.y, b.w, 6, 4); ctx.fill(); ctx.fillStyle = c.text; ctx.font = '9px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText((b.name||'').slice(0,8), b.x+b.w/2, b.y+b.h/2+2); const tg = b.tags||{}; let dx = b.x+6; const dy = b.y+b.h-6; if (tg.common) { ctx.fillStyle = '#6366f1'; ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI*2); ctx.fill(); dx += 8; } if (tg.linked) { ctx.fillStyle = '#14b8a6'; ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI*2); ctx.fill(); dx += 8; } if (tg.review) { ctx.fillStyle = '#f43f5e'; ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI*2); ctx.fill(); } }
+function drawBuilding(ctx, b, c, sel, hov) {
+  const bt = getBuildingType(b.buildingType);
+  ctx.shadowColor = hov ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.1)';
+  ctx.shadowBlur = hov ? 6 : 3; ctx.shadowOffsetY = hov ? 3 : 1;
+  ctx.fillStyle = sel ? '#fef3c7' : c.bldFill;
+  ctx.strokeStyle = sel ? '#f59e0b' : c.border;
+  ctx.lineWidth = sel ? 2 : 1;
+  roundedRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill(); ctx.stroke();
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+  // Type color bar (left side)
+  ctx.fillStyle = bt.color;
+  ctx.fillRect(b.x, b.y, 4, b.h);
+  // Roof accent
+  ctx.fillStyle = bt.color;
+  roundedRect(ctx, b.x, b.y, b.w, 6, 4); ctx.fill();
+  // Type emoji (large, center-top)
+  ctx.font = '16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(bt.emoji, b.x + b.w / 2, b.y + b.h / 2 - 6);
+  // Name (below emoji)
+  ctx.fillStyle = c.text; ctx.font = '8px monospace';
+  ctx.fillText((b.name || '').slice(0, 8), b.x + b.w / 2, b.y + b.h / 2 + 10);
+  // Tag dots
+  const tg = b.tags || {}; let dx = b.x + 6; const dy = b.y + b.h - 5;
+  if (tg.common) { ctx.fillStyle = '#6366f1'; ctx.beginPath(); ctx.arc(dx, dy, 2.5, 0, Math.PI*2); ctx.fill(); dx += 7; }
+  if (tg.linked) { ctx.fillStyle = '#14b8a6'; ctx.beginPath(); ctx.arc(dx, dy, 2.5, 0, Math.PI*2); ctx.fill(); dx += 7; }
+  if (tg.review) { ctx.fillStyle = '#f43f5e'; ctx.beginPath(); ctx.arc(dx, dy, 2.5, 0, Math.PI*2); ctx.fill(); }
+}
 function drawHierRoad(ctx, f, t, th) { const fx = f.x+(f.w||0)/2, fy = f.y+(f.h||0)/2, tx = t.x+(t.w||0)/2, ty = t.y+(t.h||0)/2; ctx.strokeStyle = th === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke(); }
-function drawRoadLine(ctx, f, t, road, c, th, sel) { const fx = f.x+(f.w||0)/2, fy = f.y+(f.h||0)/2, tx = t.x+(t.w||0)/2, ty = t.y+(t.h||0)/2; const rt = ROAD_TYPES[road.type]||ROAD_TYPES.main; const vi = VEHICLE_INFO[road.vehicle]||VEHICLE_INFO.car; ctx.strokeStyle = sel ? vi.color : (c.roadFill||'#c4a45e'); ctx.lineWidth = sel ? rt.width+3 : rt.width+2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke(); ctx.strokeStyle = th === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.6)'; ctx.lineWidth = rt.width; if (rt.dash) ctx.setLineDash(rt.dash); ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]); ctx.strokeStyle = vi.color; ctx.lineWidth = 1; ctx.setLineDash([4,6]); ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]); }
+function drawRoadLine(ctx, f, t, road, c, th, sel) {
+  const fx = f.x+(f.w||0)/2, fy = f.y+(f.h||0)/2, tx = t.x+(t.w||0)/2, ty = t.y+(t.h||0)/2;
+  const rt = ROAD_TYPES[road.type]||ROAD_TYPES.main;
+  const vi = VEHICLE_TYPES[road.vehicle]||VEHICLE_TYPES.car;
+  const dt = DATA_TYPES[road.dataType]||DATA_TYPES.content;
+  // Road body
+  ctx.strokeStyle = sel ? vi.color : (c.roadFill||'#c4a45e');
+  ctx.lineWidth = sel ? (rt.width||6)+3 : (rt.width||6)+2; ctx.lineCap = 'round';
+  ctx.globalAlpha = rt.opacity || 1;
+  ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
+  // Road surface
+  ctx.strokeStyle = th === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = rt.width||6; if (rt.dash) ctx.setLineDash(rt.dash);
+  ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
+  ctx.setLineDash([]);
+  // Data type color center line
+  ctx.strokeStyle = dt.color; ctx.lineWidth = 1.5; ctx.setLineDash([4,6]);
+  ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
 function roundedRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath(); }
 function clampView(v, cs, layout) { if (!layout.districts.length) return v; const b = getLayoutBounds(layout); const m = 200; let { panX, panY, zoom } = v; const cMinX = b.minX*zoom+panX, cMaxX = b.maxX*zoom+panX, cMinY = b.minY*zoom+panY, cMaxY = b.maxY*zoom+panY; if (cMaxX < -m) panX += (-m-cMaxX); if (cMinX > cs.w+m) panX -= (cMinX-cs.w-m); if (cMaxY < -m) panY += (-m-cMaxY); if (cMinY > cs.h+m) panY -= (cMinY-cs.h-m); return { panX, panY, zoom }; }
 function getLayoutBounds(layout) { let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity; for (const d of layout.districts) { minX=Math.min(minX,d.x); minY=Math.min(minY,d.y); maxX=Math.max(maxX,d.x+d.width); maxY=Math.max(maxY,d.y+d.height); } for (const i of layout.allItems) { minX=Math.min(minX,i.x); minY=Math.min(minY,i.y); maxX=Math.max(maxX,i.x+(i.w||0)); maxY=Math.max(maxY,i.y+(i.h||0)); } for (const i of layout.unplacedItems||[]) { minX=Math.min(minX,i.x); minY=Math.min(minY,i.y); maxX=Math.max(maxX,i.x+(i.w||0)); maxY=Math.max(maxY,i.y+(i.h||0)); } return { minX, minY, maxX, maxY }; }
