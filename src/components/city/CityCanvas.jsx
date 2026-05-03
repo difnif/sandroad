@@ -174,11 +174,11 @@ export default function CityCanvas({
     setHoveredId(hit?.id || null);
 
     if (isPanning.current) {
-      setViewState(prev => ({
+      setViewState(prev => clampView({
         ...prev,
         panX: e.clientX - panStart.current.x,
         panY: e.clientY - panStart.current.y
-      }));
+      }, canvasSize, layout));
     }
   };
 
@@ -228,11 +228,11 @@ export default function CityCanvas({
   const handleTouchMove = (e) => {
     e.preventDefault();
     if (e.touches.length === 1 && isPanning.current) {
-      setViewState(prev => ({
+      setViewState(prev => clampView({
         ...prev,
         panX: e.touches[0].clientX - panStart.current.x,
         panY: e.touches[0].clientY - panStart.current.y
-      }));
+      }, canvasSize, layout));
     } else if (e.touches.length === 2) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -240,12 +240,11 @@ export default function CityCanvas({
       );
       if (lastTouchDist.current > 0) {
         const rawScale = dist / lastTouchDist.current;
-        // Dampen the scale to prevent flying away
         const scale = 1 + (rawScale - 1) * 0.5;
-        setViewState(prev => ({
+        setViewState(prev => clampView({
           ...prev,
           zoom: Math.max(0.15, Math.min(5, prev.zoom * scale))
-        }));
+        }, canvasSize, layout));
       }
       lastTouchDist.current = dist;
 
@@ -254,11 +253,11 @@ export default function CityCanvas({
         y: (e.touches[0].clientY + e.touches[1].clientY) / 2
       };
       if (lastTouchCenter.current) {
-        setViewState(prev => ({
+        setViewState(prev => clampView({
           ...prev,
           panX: prev.panX + (center.x - lastTouchCenter.current.x),
           panY: prev.panY + (center.y - lastTouchCenter.current.y)
-        }));
+        }, canvasSize, layout));
       }
       lastTouchCenter.current = center;
     }
@@ -292,18 +291,18 @@ export default function CityCanvas({
 
   const handleWheel = (e) => {
     e.preventDefault();
-    const scale = e.deltaY > 0 ? 0.95 : 1.05;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const factor = e.deltaY > 0 ? 0.95 : 1.05;
     setViewState(prev => {
-      const newZoom = Math.max(0.15, Math.min(5, prev.zoom * scale));
+      const newZoom = Math.max(0.15, Math.min(5, prev.zoom * factor));
+      // Zoom toward center of screen
+      const cx = canvasSize.w / 2;
+      const cy = canvasSize.h / 2;
       const ratio = newZoom / prev.zoom;
-      return {
+      return clampView({
         zoom: newZoom,
-        panX: mx - (mx - prev.panX) * ratio,
-        panY: my - (my - prev.panY) * ratio
-      };
+        panX: cx - (cx - prev.panX) * ratio,
+        panY: cy - (cy - prev.panY) * ratio
+      }, canvasSize, layout);
     });
   };
 
@@ -467,6 +466,30 @@ function roundedRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
+}
+
+// Clamp view so content stays visible
+function clampView(view, canvasSize, layout) {
+  if (!layout.districts.length) return view;
+  const bounds = getLayoutBounds(layout);
+  const margin = 200;
+  const z = view.zoom;
+
+  // Content extent in screen coords
+  const contentMinX = bounds.minX * z + view.panX;
+  const contentMaxX = bounds.maxX * z + view.panX;
+  const contentMinY = bounds.minY * z + view.panY;
+  const contentMaxY = bounds.maxY * z + view.panY;
+
+  let { panX, panY, zoom } = view;
+
+  // Don't let content completely leave the screen
+  if (contentMaxX < -margin) panX += (-margin - contentMaxX);
+  if (contentMinX > canvasSize.w + margin) panX -= (contentMinX - canvasSize.w - margin);
+  if (contentMaxY < -margin) panY += (-margin - contentMaxY);
+  if (contentMinY > canvasSize.h + margin) panY -= (contentMinY - canvasSize.h - margin);
+
+  return { panX, panY, zoom };
 }
 
 function getLayoutBounds(layout) {
