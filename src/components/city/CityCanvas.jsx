@@ -330,7 +330,17 @@ export default function CityCanvas({
       const now = Date.now();
       if (hit) {
         if (now - lastTapTime.current < 400 && selectedId === hit.id) {
-          onRequestInlineEdit?.(hit.id);
+          // Double-click on PC: enter drag mode (not inline edit)
+          const item = layout.allItems.find(i => i.id === hit.id);
+          if (item) {
+            setDragState({
+              itemId: item.id,
+              origX: item.x, origY: item.y,
+              currentX: item.x, currentY: item.y,
+              itemW: item.w, itemH: item.h,
+              phase: 'dragging'
+            });
+          }
         } else {
           onSelectNode?.(hit.id);
         }
@@ -518,31 +528,48 @@ export default function CityCanvas({
         </div>
       )}
 
-      {/* Confirm/Cancel buttons */}
+      {/* Confirm/Cancel — RPG style circular buttons */}
       {confirmPos && (
         <div
-          className="absolute flex items-center gap-2 z-20"
+          className="absolute flex items-center gap-3 z-20"
           style={{ left: confirmPos.x, top: confirmPos.y, transform: 'translateX(-50%)' }}
         >
+          {/* Confirm (green circle with check) */}
           <button
             onClick={handleConfirm}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-lg ${theme.buttonPrimary}`}
+            className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border-2 transition-transform active:scale-90"
+            style={{
+              background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+              borderColor: '#15803d',
+              boxShadow: '0 4px 12px rgba(22,163,74,0.4), inset 0 1px 2px rgba(255,255,255,0.3)'
+            }}
           >
-            {lang === 'ko' ? '확인' : 'Confirm'}
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
           </button>
+          {/* Cancel (red circle with X) */}
           <button
             onClick={handleCancel}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-lg ${theme.button} border`}
+            className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border-2 transition-transform active:scale-90"
+            style={{
+              background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+              borderColor: '#b91c1c',
+              boxShadow: '0 4px 12px rgba(220,38,38,0.4), inset 0 1px 2px rgba(255,255,255,0.3)'
+            }}
           >
-            {lang === 'ko' ? '취소' : 'Cancel'}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
       )}
 
-      {/* Long press hint (shown when item is hovered and not dragging) */}
+      {/* Long press / double-click hint */}
       {hoveredId && !dragState && (
         <div className={`absolute bottom-3 left-1/2 -translate-x-1/2 ${theme.bgPanel} border ${theme.border} rounded-full px-3 py-1 text-[9px] ${theme.textDim} ${monoCls}`}>
-          {lang === 'ko' ? '꾹 눌러서 배치 변경' : 'Long press to move'}
+          {lang === 'ko' ? '더블클릭 또는 꾹 눌러서 배치 변경' : 'Double-click or long press to move'}
         </div>
       )}
     </div>
