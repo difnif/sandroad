@@ -15,6 +15,7 @@ export default function CityCanvas({
   const [viewState, setViewState] = useState({ panX: 0, panY: 0, zoom: 1 });
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
   const [hoveredId, setHoveredId] = useState(null);
+  const initializedRef = useRef(false);
 
   // Interaction refs
   const isPanning = useRef(false);
@@ -25,6 +26,16 @@ export default function CityCanvas({
 
   // Layout
   const layout = useMemo(() => computeCityLayout(project), [project]);
+
+  // Reset auto-center when project changes
+  const projectIdRef = useRef(null);
+  useEffect(() => {
+    const pid = project?.id || null;
+    if (pid !== projectIdRef.current) {
+      projectIdRef.current = pid;
+      initializedRef.current = false;
+    }
+  }, [project]);
 
   // Resize observer
   useEffect(() => {
@@ -38,9 +49,11 @@ export default function CityCanvas({
     return () => obs.disconnect();
   }, []);
 
-  // Auto-center on first load
+  // Auto-center on first load only
   useEffect(() => {
     if (layout.districts.length === 0) return;
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     const bounds = getLayoutBounds(layout);
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cy = (bounds.minY + bounds.maxY) / 2;
@@ -226,10 +239,12 @@ export default function CityCanvas({
         e.touches[0].clientY - e.touches[1].clientY
       );
       if (lastTouchDist.current > 0) {
-        const scale = dist / lastTouchDist.current;
+        const rawScale = dist / lastTouchDist.current;
+        // Dampen the scale to prevent flying away
+        const scale = 1 + (rawScale - 1) * 0.5;
         setViewState(prev => ({
           ...prev,
-          zoom: Math.max(0.2, Math.min(4, prev.zoom * scale))
+          zoom: Math.max(0.15, Math.min(5, prev.zoom * scale))
         }));
       }
       lastTouchDist.current = dist;
@@ -277,12 +292,12 @@ export default function CityCanvas({
 
   const handleWheel = (e) => {
     e.preventDefault();
-    const scale = e.deltaY > 0 ? 0.9 : 1.1;
+    const scale = e.deltaY > 0 ? 0.95 : 1.05;
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     setViewState(prev => {
-      const newZoom = Math.max(0.2, Math.min(4, prev.zoom * scale));
+      const newZoom = Math.max(0.15, Math.min(5, prev.zoom * scale));
       const ratio = newZoom / prev.zoom;
       return {
         zoom: newZoom,
