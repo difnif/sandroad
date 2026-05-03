@@ -5,7 +5,7 @@ import ProtectedRoute from './components/auth/ProtectedRoute.jsx';
 import LoginScreen from './screens/LoginScreen.jsx';
 import SignupScreen from './screens/SignupScreen.jsx';
 import EditorScreen from './screens/EditorScreen.jsx';
-import GraphViewScreen from './screens/GraphViewScreen.jsx';
+import CityViewScreen from './screens/CityViewScreen.jsx';
 import LoadingSpinner from './components/common/LoadingSpinner.jsx';
 
 export default function App() {
@@ -31,7 +31,7 @@ export default function App() {
         path="/graph"
         element={
           <ProtectedRoute>
-            <GraphViewScreen />
+            <CityViewScreen />
           </ProtectedRoute>
         }
       />
