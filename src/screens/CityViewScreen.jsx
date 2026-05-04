@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Edit3, Undo2, Redo2 } from 'lucide-react';
+import { Edit3, Undo2, Redo2, FileDown } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useActions, ACTION_TYPES } from '../contexts/ActionContext.jsx';
@@ -15,6 +15,7 @@ import CityCanvas from '../components/city/CityCanvas.jsx';
 import ActionTimeline from '../components/graph/ActionTimeline.jsx';
 import ConsultBar from '../components/graph/ConsultBar.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
+import { downloadArchDoc } from '../utils/archExport.js';
 
 export default function CityViewScreen() {
   const navigate = useNavigate();
@@ -234,6 +235,11 @@ export default function CityViewScreen() {
         </button>
 
         <div className="flex-1" />
+        <button onClick={() => downloadArchDoc(project, lang)} disabled={!project}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${theme.button}`}
+          title={lang === 'ko' ? '아키텍처 명세서 내보내기' : 'Export architecture spec'}>
+          <FileDown size={12} /> {lang === 'ko' ? '명세서' : 'spec'}
+        </button>
         <button onClick={() => navigate('/')} className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded ${monoCls} ${theme.button}`}>
           <Edit3 size={12} /> editor
         </button>
