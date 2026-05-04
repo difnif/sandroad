@@ -15,7 +15,7 @@ import CityCanvas from '../components/city/CityCanvas.jsx';
 import ActionTimeline from '../components/graph/ActionTimeline.jsx';
 import ConsultBar from '../components/graph/ConsultBar.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
-import { downloadArchDoc } from '../utils/archExport.js';
+import ArchPanel from '../components/city/ArchPanel.jsx';
 
 export default function CityViewScreen() {
   const navigate = useNavigate();
@@ -32,6 +32,7 @@ export default function CityViewScreen() {
   const [inlineEditValue, setInlineEditValue] = useState('');
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [consultCollapsed, setConsultCollapsed] = useState(true);
+  const [archPanelCollapsed, setArchPanelCollapsed] = useState(true);
   const [chatMessages, setChatMessages] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -235,9 +236,9 @@ export default function CityViewScreen() {
         </button>
 
         <div className="flex-1" />
-        <button onClick={() => downloadArchDoc(project, lang)} disabled={!project}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${theme.button}`}
-          title={lang === 'ko' ? '아키텍처 명세서 내보내기' : 'Export architecture spec'}>
+        <button onClick={() => { setArchPanelCollapsed(p => { if (p) setConsultCollapsed(true); return !p; }); }} disabled={!project}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${!archPanelCollapsed ? theme.buttonPrimary : theme.button}`}
+          title={lang === 'ko' ? '아키텍처 명세서' : 'Architecture spec'}>
           <FileDown size={12} /> {lang === 'ko' ? '명세서' : 'spec'}
         </button>
         <button onClick={() => navigate('/')} className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded ${monoCls} ${theme.button}`}>
@@ -394,8 +395,28 @@ export default function CityViewScreen() {
         )}
       </div>
 
-      <ConsultBar collapsed={consultCollapsed} onToggleCollapse={() => setConsultCollapsed(p => !p)}
-        onSendMessage={handleSendMessage} messages={chatMessages} isLoading={aiLoading} />
+      {/* Bottom panels — only one expanded at a time */}
+      {!archPanelCollapsed ? (
+        <ArchPanel project={project} collapsed={false}
+          onToggleCollapse={() => setArchPanelCollapsed(true)} />
+      ) : !consultCollapsed ? (
+        <ConsultBar collapsed={false}
+          onToggleCollapse={() => setConsultCollapsed(true)}
+          onSendMessage={handleSendMessage} messages={chatMessages} isLoading={aiLoading} />
+      ) : (
+        <div className={`${theme.bgPanel} border-t ${theme.border} px-3 py-1.5 flex items-center gap-3`}>
+          <button onClick={() => { setConsultCollapsed(false); setArchPanelCollapsed(true); }}
+            className={`flex items-center gap-1 text-[11px] ${theme.textMuted} ${monoCls}`}>
+            🤖 {lang === 'ko' ? 'AI 상담' : 'AI Consult'}
+            {chatMessages.length > 0 && <span className="text-[8px] px-1 rounded-full bg-amber-500 text-white font-bold">{chatMessages.length}</span>}
+          </button>
+          <div className={`w-px h-4 ${theme.border}`} />
+          <button onClick={() => { setArchPanelCollapsed(false); setConsultCollapsed(true); }}
+            className={`flex items-center gap-1 text-[11px] ${theme.textMuted} ${monoCls}`}>
+            📄 {lang === 'ko' ? '명세서' : 'Spec'}
+          </button>
+        </div>
+      )}
 
       {/* Unit Type Picker Modal */}
       {typePicker && (
