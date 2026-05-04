@@ -1,363 +1,282 @@
 // Architecture Specification Document Generator
-// Converts entire project (tree + city view + roads) into
-// a structured document for AI code development instructions.
+// Supports section-by-section generation for progress UI
 
 import { BUILDING_TYPES, VEHICLE_TYPES, ROAD_TYPES, DATA_TYPES } from '../constants/unitTypes.js';
 
-export function exportArchitectureDoc(project, lang = 'ko') {
-  if (!project) return '';
+// Section definitions with weights for progress calculation
+const SECTIONS = [
+  { id: 'header',     weight: 2,  label_ko: '헤더 생성',           label_en: 'Generating header' },
+  { id: 'overview',   weight: 5,  label_ko: '프로젝트 개요',       label_en: 'Project overview' },
+  { id: 'structure',  weight: 20, label_ko: '구역별 구조 분석',     label_en: 'Analyzing district structure' },
+  { id: 'connections',weight: 20, label_ko: '연결 관계 매핑',       label_en: 'Mapping connections' },
+  { id: 'pernode',    weight: 15, label_ko: '노드별 상세 연결',     label_en: 'Per-node connection detail' },
+  { id: 'dataflow',   weight: 10, label_ko: '데이터 흐름 요약',     label_en: 'Data flow summary' },
+  { id: 'inventory',  weight: 8,  label_ko: '컴포넌트 인벤토리',    label_en: 'Component inventory' },
+  { id: 'integration',weight: 5,  label_ko: '연동 방식 분포',       label_en: 'Integration distribution' },
+  { id: 'tree',       weight: 5,  label_ko: '계층 트리 구성',       label_en: 'Building hierarchy tree' },
+  { id: 'depgraph',   weight: 5,  label_ko: '의존 관계 그래프',     label_en: 'Dependency graph' },
+  { id: 'context',    weight: 5,  label_ko: 'AI 컨텍스트 정리',     label_en: 'AI context summary' },
+];
+
+// Generate document section by section, calling onProgress after each
+// onProgress({ percent, sectionLabel, done, content })
+export async function generateArchDoc(project, lang, onProgress) {
+  if (!project) { onProgress?.({ percent: 100, sectionLabel: '', done: true, content: '' }); return ''; }
+
   const L = (ko, en) => lang === 'ko' ? ko : en;
   const cols = project.columns || [];
   const roads = project.roads || [];
-  const lines = [];
-
-  // ============ HEADER ============
-  lines.push(`# ${project.name || 'Untitled'} — ${L('아키텍처 명세서', 'Architecture Specification')}`);
-  lines.push(`> ${L('자동 생성됨', 'Auto-generated')} | ${new Date().toLocaleDateString()} | sandroad`);
-  lines.push('');
-
-  // ============ OVERVIEW ============
-  lines.push(`## 1. ${L('프로젝트 개요', 'Project Overview')}`);
-  lines.push('');
-  const totalItems = countAllItems(project);
-  const totalRoads = roads.length;
-  const districtNames = cols.map(c => c.label).join(', ');
-  lines.push(`- **${L('프로젝트명', 'Project')}**: ${project.name || 'Untitled'}`);
-  lines.push(`- **${L('구역 수', 'Districts')}**: ${cols.length} (${districtNames})`);
-  lines.push(`- **${L('총 항목 수', 'Total items')}**: ${totalItems}`);
-  lines.push(`- **${L('연결(도로) 수', 'Connections')}**: ${totalRoads}`);
-  lines.push('');
-
-  // ============ DISTRICT STRUCTURE ============
-  lines.push(`## 2. ${L('구역별 구조', 'District Structure')}`);
-  lines.push('');
-
-  cols.forEach((col, colIdx) => {
-    const items = project.structure[col.key] || [];
-    lines.push(`### ${L('구역', 'District')} ${colIdx + 1}: ${col.label}`);
-    lines.push('');
-    if (items.length === 0) {
-      lines.push(`_(${L('항목 없음', 'No items')})_`);
-    } else {
-      renderTreeDetailed(items, lines, 0, lang, roads, project);
-    }
-    lines.push('');
-  });
-
-  // ============ CONNECTION MAP ============
-  lines.push(`## 3. ${L('연결 관계', 'Connection Map')}`);
-  lines.push('');
-
-  if (roads.length === 0) {
-    lines.push(`_(${L('연결 없음', 'No connections')})_`);
-  } else {
-    // Group roads by source
-    const grouped = {};
-    roads.forEach(road => {
-      if (!grouped[road.from]) grouped[road.from] = [];
-      grouped[road.from].push(road);
-    });
-
-    // Also collect reverse for bidirectional view
-    const reverseGrouped = {};
-    roads.forEach(road => {
-      if (!reverseGrouped[road.to]) reverseGrouped[road.to] = [];
-      reverseGrouped[road.to].push(road);
-    });
-
-    const nodeMap = buildNodeMap(project);
-
-    lines.push(`| # | ${L('출발', 'From')} | ${L('도착', 'To')} | ${L('도로', 'Road')} | ${L('이동수단', 'Vehicle')} | ${L('데이터', 'Data')} | ${L('설명', 'Description')} |`);
-    lines.push('|---|------|------|------|---------|--------|------|');
-
-    roads.forEach((road, idx) => {
-      const fromNode = nodeMap[road.from];
-      const toNode = nodeMap[road.to];
-      const rt = ROAD_TYPES[road.type] || ROAD_TYPES.main;
-      const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
-      const dt = DATA_TYPES[road.dataType] || DATA_TYPES.content;
-
-      const fromName = fromNode ? `${getBtEmoji(fromNode.buildingType)} ${fromNode.name}` : road.from;
-      const toName = toNode ? `${getBtEmoji(toNode.buildingType)} ${toNode.name}` : road.to;
-
-      lines.push(`| ${idx + 1} | ${fromName} | ${toName} | ${vt.emoji} ${L(rt.label_ko, rt.label_en)} | ${vt.emoji} ${L(vt.label_ko, vt.label_en)} (${L(vt.desc_ko, vt.desc_en)}) | ${dt.emoji} ${L(dt.label_ko, dt.label_en)} | ${road.label || ''} |`);
-    });
-    lines.push('');
-
-    // ============ PER-NODE CONNECTION DETAIL ============
-    lines.push(`### 3-1. ${L('노드별 연결 상세', 'Per-Node Connection Detail')}`);
-    lines.push('');
-
-    const allNodeIds = new Set([...roads.map(r => r.from), ...roads.map(r => r.to)]);
-    for (const nodeId of allNodeIds) {
-      const node = nodeMap[nodeId];
-      if (!node) continue;
-      const bt = BUILDING_TYPES[node.buildingType] || BUILDING_TYPES.page;
-
-      const outgoing = grouped[nodeId] || [];
-      const incoming = reverseGrouped[nodeId] || [];
-
-      if (outgoing.length === 0 && incoming.length === 0) continue;
-
-      lines.push(`#### ${bt.emoji} ${node.name} (${L(bt.label_ko, bt.label_en)})`);
-      lines.push('');
-
-      if (outgoing.length > 0) {
-        lines.push(`**${L('보내는 연결', 'Outgoing')}** (${outgoing.length}):`);
-        outgoing.forEach(road => {
-          const target = nodeMap[road.to];
-          const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
-          const dt = DATA_TYPES[road.dataType] || DATA_TYPES.content;
-          const targetBt = getBtEmoji(target?.buildingType);
-          lines.push(`- → ${targetBt} **${target?.name || '?'}** | ${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)}${road.label ? ` | "${road.label}"` : ''}`);
-        });
-        lines.push('');
-      }
-
-      if (incoming.length > 0) {
-        lines.push(`**${L('받는 연결', 'Incoming')}** (${incoming.length}):`);
-        incoming.forEach(road => {
-          const source = nodeMap[road.from];
-          const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
-          const dt = DATA_TYPES[road.dataType] || DATA_TYPES.content;
-          const sourceBt = getBtEmoji(source?.buildingType);
-          lines.push(`- ← ${sourceBt} **${source?.name || '?'}** | ${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)}${road.label ? ` | "${road.label}"` : ''}`);
-        });
-        lines.push('');
-      }
-    }
-  }
-
-  // ============ DATA FLOW SUMMARY ============
-  lines.push(`## 4. ${L('데이터 흐름 요약', 'Data Flow Summary')}`);
-  lines.push('');
-
-  const dataFlows = {};
-  roads.forEach(road => {
-    const dt = road.dataType || 'content';
-    if (!dataFlows[dt]) dataFlows[dt] = [];
-    dataFlows[dt].push(road);
-  });
-
-  if (Object.keys(dataFlows).length === 0) {
-    lines.push(`_(${L('데이터 흐름 없음', 'No data flows')})_`);
-  } else {
-    const nodeMap = buildNodeMap(project);
-    for (const [dtKey, dtRoads] of Object.entries(dataFlows)) {
-      const dt = DATA_TYPES[dtKey] || DATA_TYPES.content;
-      lines.push(`### ${dt.emoji} ${L(dt.label_ko, dt.label_en)}`);
-      lines.push('');
-      dtRoads.forEach(road => {
-        const from = nodeMap[road.from];
-        const to = nodeMap[road.to];
-        const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
-        lines.push(`- ${getBtEmoji(from?.buildingType)} ${from?.name || '?'} → ${getBtEmoji(to?.buildingType)} ${to?.name || '?'} (${vt.emoji} ${L(vt.desc_ko, vt.desc_en)})`);
-      });
-      lines.push('');
-    }
-  }
-
-  // ============ COMPONENT INVENTORY ============
-  lines.push(`## 5. ${L('컴포넌트 인벤토리', 'Component Inventory')}`);
-  lines.push('');
-
-  const typeCount = {};
   const nodeMap = buildNodeMap(project);
-  for (const node of Object.values(nodeMap)) {
-    const bt = node.buildingType || 'page';
-    if (!typeCount[bt]) typeCount[bt] = { count: 0, items: [] };
-    typeCount[bt].count++;
-    typeCount[bt].items.push(node.name);
+  const totalWeight = SECTIONS.reduce((s, sec) => s + sec.weight, 0);
+  let doneWeight = 0;
+  let content = '';
+
+  for (const section of SECTIONS) {
+    // Report start
+    onProgress?.({
+      percent: Math.round((doneWeight / totalWeight) * 100),
+      sectionLabel: L(section.label_ko, section.label_en),
+      done: false,
+      content
+    });
+
+    // Small delay for visual progress
+    await delay(80 + Math.random() * 120);
+
+    // Generate section
+    const sectionContent = generateSection(section.id, project, cols, roads, nodeMap, L, lang);
+    content += sectionContent;
+    doneWeight += section.weight;
   }
 
-  lines.push(`| ${L('유형', 'Type')} | ${L('아이콘', 'Icon')} | ${L('개수', 'Count')} | ${L('항목', 'Items')} |`);
-  lines.push('|------|------|------|------|');
+  // Done
+  onProgress?.({ percent: 100, sectionLabel: L('완료', 'Complete'), done: true, content });
+  return content;
+}
 
-  for (const [btKey, data] of Object.entries(typeCount)) {
-    const bt = BUILDING_TYPES[btKey] || BUILDING_TYPES.page;
-    lines.push(`| ${L(bt.label_ko, bt.label_en)} | ${bt.emoji} | ${data.count} | ${data.items.join(', ')} |`);
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Individual section generators
+function generateSection(id, project, cols, roads, nodeMap, L, lang) {
+  switch (id) {
+    case 'header': return genHeader(project, L);
+    case 'overview': return genOverview(project, cols, roads, L);
+    case 'structure': return genStructure(project, cols, roads, nodeMap, L, lang);
+    case 'connections': return genConnections(roads, nodeMap, L);
+    case 'pernode': return genPerNode(roads, nodeMap, L);
+    case 'dataflow': return genDataFlow(roads, nodeMap, L);
+    case 'inventory': return genInventory(nodeMap, L);
+    case 'integration': return genIntegration(roads, L);
+    case 'tree': return genTree(project, cols, nodeMap, L);
+    case 'depgraph': return genDepGraph(roads, nodeMap, L);
+    case 'context': return genContext(L);
+    default: return '';
   }
-  lines.push('');
+}
 
-  // ============ INTEGRATION MAP ============
-  lines.push(`## 6. ${L('연동 방식 분포', 'Integration Method Distribution')}`);
-  lines.push('');
+function genHeader(project, L) {
+  return `# ${project.name || 'Untitled'} — ${L('아키텍처 명세서', 'Architecture Specification')}\n> ${L('자동 생성', 'Auto-generated')} | ${new Date().toLocaleDateString()} | sandroad\n\n`;
+}
 
-  const vehicleCount = {};
-  roads.forEach(road => {
-    const v = road.vehicle || 'car';
-    if (!vehicleCount[v]) vehicleCount[v] = 0;
-    vehicleCount[v]++;
-  });
+function genOverview(project, cols, roads, L) {
+  const total = countAllItems(project);
+  const names = cols.map(c => c.label).join(', ');
+  let s = `## 1. ${L('프로젝트 개요', 'Project Overview')}\n\n`;
+  s += `- **${L('프로젝트명', 'Project')}**: ${project.name || 'Untitled'}\n`;
+  s += `- **${L('구역', 'Districts')}**: ${cols.length} (${names})\n`;
+  s += `- **${L('총 항목', 'Total items')}**: ${total}\n`;
+  s += `- **${L('연결', 'Connections')}**: ${roads.length}\n\n`;
+  return s;
+}
 
-  if (Object.keys(vehicleCount).length === 0) {
-    lines.push(`_(${L('연동 없음', 'No integrations')})_`);
-  } else {
-    lines.push(`| ${L('연동 방식', 'Method')} | ${L('아이콘', 'Icon')} | ${L('설명', 'Description')} | ${L('사용 횟수', 'Count')} |`);
-    lines.push('|---------|------|------|------|');
-    for (const [vKey, count] of Object.entries(vehicleCount)) {
-      const vt = VEHICLE_TYPES[vKey] || VEHICLE_TYPES.car;
-      lines.push(`| ${L(vt.label_ko, vt.label_en)} | ${vt.emoji} | ${L(vt.desc_ko, vt.desc_en)} | ${count} |`);
-    }
-    lines.push('');
-  }
-
-  // ============ HIERARCHY TREE (COMPACT) ============
-  lines.push(`## 7. ${L('전체 계층 트리', 'Full Hierarchy Tree')}`);
-  lines.push('');
-  lines.push('```');
-  cols.forEach(col => {
+function genStructure(project, cols, roads, nodeMap, L, lang) {
+  let s = `## 2. ${L('구역별 구조', 'District Structure')}\n\n`;
+  cols.forEach((col, i) => {
     const items = project.structure[col.key] || [];
-    lines.push(`[${col.label}]`);
-    renderTreeCompact(items, lines, 1, nodeMap);
-    lines.push('');
+    s += `### ${L('구역', 'District')} ${i + 1}: ${col.label}\n\n`;
+    if (items.length === 0) { s += `_(${L('항목 없음', 'No items')})_\n\n`; return; }
+    s += renderTreeDetailed(items, 0, roads, nodeMap, L);
+    s += '\n';
   });
-  lines.push('```');
-  lines.push('');
+  return s;
+}
 
-  // ============ DEPENDENCY GRAPH (TEXT) ============
-  lines.push(`## 8. ${L('의존 관계 그래프 (텍스트)', 'Dependency Graph (Text)')}`);
-  lines.push('');
-  lines.push('```');
-  roads.forEach(road => {
-    const from = nodeMap[road.from];
-    const to = nodeMap[road.to];
+function genConnections(roads, nodeMap, L) {
+  let s = `## 3. ${L('연결 관계', 'Connection Map')}\n\n`;
+  if (roads.length === 0) { s += `_(${L('연결 없음', 'No connections')})_\n\n`; return s; }
+  s += `| # | ${L('출발', 'From')} | ${L('도착', 'To')} | ${L('도로', 'Road')} | ${L('이동수단', 'Vehicle')} | ${L('데이터', 'Data')} |\n`;
+  s += '|---|------|------|------|---------|--------|\n';
+  roads.forEach((road, idx) => {
+    const f = nodeMap[road.from], t = nodeMap[road.to];
+    const rt = ROAD_TYPES[road.type] || ROAD_TYPES.main;
     const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
     const dt = DATA_TYPES[road.dataType] || DATA_TYPES.content;
-    const arrow = road.type === 'highway' ? '===>' : road.type === 'main' ? '--->' : road.type === 'tunnel' ? '···>' : '-->';
-    lines.push(`  ${from?.name || '?'} ${arrow} ${to?.name || '?'}  [${vt.emoji} ${dt.emoji}]`);
+    s += `| ${idx+1} | ${btE(f?.buildingType)} ${f?.name||'?'} | ${btE(t?.buildingType)} ${t?.name||'?'} | ${L(rt.label_ko, rt.label_en)} | ${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)} |\n`;
   });
-  lines.push('```');
-  lines.push('');
+  s += '\n';
+  return s;
+}
 
-  // ============ AI INSTRUCTION CONTEXT ============
-  lines.push(`## 9. ${L('AI 개발 지시용 컨텍스트', 'AI Development Context')}`);
-  lines.push('');
-  lines.push(L(
-    '이 문서를 AI에게 제공하면 다음을 파악할 수 있습니다:',
-    'Providing this document to AI enables understanding of:'
-  ));
-  lines.push('');
-  lines.push(L(
-    `- **화면 구조**: 어떤 페이지/컴포넌트가 있고 어떤 계층인지
-- **데이터 흐름**: 어디서 어디로 어떤 데이터가 이동하는지
-- **연동 방식**: REST, WebSocket, 배치, 수동 등 각 연결의 기술 스택
-- **인프라 구성**: DB, 캐시, 큐, 스토리지 등의 배치
-- **외부 연동**: 서드파티 API 연결 포인트
-- **보안 경로**: 인증/권한 체크 흐름`,
-    `- **Screen structure**: Pages, components, and their hierarchy
-- **Data flow**: What data moves where and how
-- **Integration methods**: REST, WebSocket, batch, manual for each connection
-- **Infrastructure**: DB, cache, queue, storage placement
-- **External integrations**: Third-party API connection points
-- **Security paths**: Auth/permission check flows`
-  ));
-  lines.push('');
-  lines.push('---');
-  lines.push(`_${L('이 문서는 sandroad에서 자동 생성되었습니다.', 'This document was auto-generated by sandroad.')}_`);
+function genPerNode(roads, nodeMap, L) {
+  let s = `### 3-1. ${L('노드별 연결 상세', 'Per-Node Connection Detail')}\n\n`;
+  const allIds = new Set([...roads.map(r => r.from), ...roads.map(r => r.to)]);
+  for (const nid of allIds) {
+    const node = nodeMap[nid]; if (!node) continue;
+    const bt = BUILDING_TYPES[node.buildingType] || BUILDING_TYPES.page;
+    const outgoing = roads.filter(r => r.from === nid);
+    const incoming = roads.filter(r => r.to === nid);
+    if (outgoing.length === 0 && incoming.length === 0) continue;
+    s += `#### ${bt.emoji} ${node.name} (${L(bt.label_ko, bt.label_en)})\n\n`;
+    if (outgoing.length > 0) {
+      s += `**${L('보내는 연결', 'Outgoing')}** (${outgoing.length}):\n`;
+      outgoing.forEach(r => {
+        const tgt = nodeMap[r.to]; const vt = VEHICLE_TYPES[r.vehicle]||VEHICLE_TYPES.car; const dt = DATA_TYPES[r.dataType]||DATA_TYPES.content;
+        s += `- → ${btE(tgt?.buildingType)} **${tgt?.name||'?'}** | ${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)}${r.label ? ` | "${r.label}"` : ''}\n`;
+      });
+      s += '\n';
+    }
+    if (incoming.length > 0) {
+      s += `**${L('받는 연결', 'Incoming')}** (${incoming.length}):\n`;
+      incoming.forEach(r => {
+        const src = nodeMap[r.from]; const vt = VEHICLE_TYPES[r.vehicle]||VEHICLE_TYPES.car; const dt = DATA_TYPES[r.dataType]||DATA_TYPES.content;
+        s += `- ← ${btE(src?.buildingType)} **${src?.name||'?'}** | ${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)}${r.label ? ` | "${r.label}"` : ''}\n`;
+      });
+      s += '\n';
+    }
+  }
+  return s;
+}
 
-  return lines.join('\n');
+function genDataFlow(roads, nodeMap, L) {
+  let s = `## 4. ${L('데이터 흐름 요약', 'Data Flow Summary')}\n\n`;
+  const flows = {};
+  roads.forEach(r => { const k = r.dataType||'content'; if (!flows[k]) flows[k]=[]; flows[k].push(r); });
+  if (Object.keys(flows).length === 0) { s += `_(${L('없음', 'None')})_\n\n`; return s; }
+  for (const [dk, drs] of Object.entries(flows)) {
+    const dt = DATA_TYPES[dk]||DATA_TYPES.content;
+    s += `### ${dt.emoji} ${L(dt.label_ko, dt.label_en)}\n\n`;
+    drs.forEach(r => {
+      const f = nodeMap[r.from], t = nodeMap[r.to]; const vt = VEHICLE_TYPES[r.vehicle]||VEHICLE_TYPES.car;
+      s += `- ${btE(f?.buildingType)} ${f?.name||'?'} → ${btE(t?.buildingType)} ${t?.name||'?'} (${vt.emoji} ${L(vt.desc_ko, vt.desc_en)})\n`;
+    });
+    s += '\n';
+  }
+  return s;
+}
+
+function genInventory(nodeMap, L) {
+  let s = `## 5. ${L('컴포넌트 인벤토리', 'Component Inventory')}\n\n`;
+  const tc = {};
+  for (const n of Object.values(nodeMap)) {
+    const k = n.buildingType||'page';
+    if (!tc[k]) tc[k] = { count: 0, items: [] };
+    tc[k].count++; tc[k].items.push(n.name);
+  }
+  s += `| ${L('유형', 'Type')} | ${L('아이콘', 'Icon')} | ${L('개수', 'Count')} | ${L('항목', 'Items')} |\n`;
+  s += '|------|------|------|------|\n';
+  for (const [k, d] of Object.entries(tc)) {
+    const bt = BUILDING_TYPES[k]||BUILDING_TYPES.page;
+    s += `| ${L(bt.label_ko, bt.label_en)} | ${bt.emoji} | ${d.count} | ${d.items.join(', ')} |\n`;
+  }
+  s += '\n';
+  return s;
+}
+
+function genIntegration(roads, L) {
+  let s = `## 6. ${L('연동 방식 분포', 'Integration Distribution')}\n\n`;
+  const vc = {};
+  roads.forEach(r => { const k = r.vehicle||'car'; vc[k] = (vc[k]||0)+1; });
+  if (Object.keys(vc).length === 0) { s += `_(${L('없음', 'None')})_\n\n`; return s; }
+  s += `| ${L('방식', 'Method')} | ${L('아이콘', 'Icon')} | ${L('설명', 'Desc')} | ${L('횟수', 'Count')} |\n`;
+  s += '|------|------|------|------|\n';
+  for (const [k, c] of Object.entries(vc)) {
+    const vt = VEHICLE_TYPES[k]||VEHICLE_TYPES.car;
+    s += `| ${L(vt.label_ko, vt.label_en)} | ${vt.emoji} | ${L(vt.desc_ko, vt.desc_en)} | ${c} |\n`;
+  }
+  s += '\n';
+  return s;
+}
+
+function genTree(project, cols, nodeMap, L) {
+  let s = `## 7. ${L('전체 계층 트리', 'Full Hierarchy Tree')}\n\n\`\`\`\n`;
+  cols.forEach(col => {
+    s += `[${col.label}]\n`;
+    s += treeCompact(project.structure[col.key]||[], 1);
+    s += '\n';
+  });
+  s += '```\n\n';
+  return s;
+}
+
+function genDepGraph(roads, nodeMap, L) {
+  let s = `## 8. ${L('의존 관계 그래프', 'Dependency Graph')}\n\n\`\`\`\n`;
+  roads.forEach(r => {
+    const f = nodeMap[r.from], t = nodeMap[r.to];
+    const vt = VEHICLE_TYPES[r.vehicle]||VEHICLE_TYPES.car;
+    const dt = DATA_TYPES[r.dataType]||DATA_TYPES.content;
+    const arrow = r.type === 'highway' ? '===>' : r.type === 'main' ? '--->' : r.type === 'tunnel' ? '···>' : '-->';
+    s += `  ${f?.name||'?'} ${arrow} ${t?.name||'?'}  [${vt.emoji}${dt.emoji}]\n`;
+  });
+  s += '```\n\n';
+  return s;
+}
+
+function genContext(L) {
+  let s = `## 9. ${L('AI 개발 지시용 컨텍스트', 'AI Development Context')}\n\n`;
+  s += L(
+    `이 문서를 AI에게 제공하면 다음을 파악할 수 있습니다:\n\n- **화면 구조**: 페이지/컴포넌트 계층과 역할\n- **데이터 흐름**: 어디서 어디로 어떤 데이터가 이동하는지\n- **연동 방식**: REST, WebSocket, 배치 등 각 연결의 기술 스택\n- **인프라 구성**: DB, 캐시, 큐, 스토리지 등의 배치\n- **외부 연동**: 서드파티 API 연결 포인트\n- **보안 경로**: 인증/권한 체크 흐름\n`,
+    `Providing this document to AI enables:\n\n- **Screen structure**: Page/component hierarchy and roles\n- **Data flow**: What data moves where\n- **Integration methods**: REST, WebSocket, batch tech stack per connection\n- **Infrastructure**: DB, cache, queue, storage placement\n- **External integrations**: Third-party API points\n- **Security paths**: Auth/permission flows\n`
+  );
+  s += '\n---\n_sandroad auto-generated_\n';
+  return s;
 }
 
 // ===== Helpers =====
-
-function renderTreeDetailed(nodes, lines, depth, lang, roads, project) {
-  const indent = '  '.repeat(depth);
-  const nodeMap = buildNodeMap(project);
-  const L = (ko, en) => lang === 'ko' ? ko : en;
-
+function renderTreeDetailed(nodes, depth, roads, nodeMap, L) {
+  let s = '';
+  const ind = '  '.repeat(depth);
   nodes.forEach(node => {
-    const bt = BUILDING_TYPES[node.buildingType] || BUILDING_TYPES.page;
-    const hasChildren = node.children && node.children.length > 0;
-    const typeLabel = `[${bt.emoji} ${L(bt.label_ko, bt.label_en)}]`;
-
-    // Count connections for this node
+    const bt = BUILDING_TYPES[node.buildingType]||BUILDING_TYPES.page;
     const connOut = roads.filter(r => r.from === node.id).length;
     const connIn = roads.filter(r => r.to === node.id).length;
-    const connStr = (connOut + connIn) > 0
-      ? ` (${L('연결', 'conn')}: ↑${connIn} ↓${connOut})`
-      : '';
-
-    lines.push(`${indent}- ${typeLabel} **${node.name || L('(이름없음)', '(unnamed)')}**${connStr}`);
-
-    // Tags
-    const tags = node.tags || {};
+    const connStr = (connOut+connIn) > 0 ? ` (${L('연결','conn')}: ↑${connIn} ↓${connOut})` : '';
+    s += `${ind}- [${bt.emoji} ${L(bt.label_ko, bt.label_en)}] **${node.name||L('(이름없음)','(unnamed)')}**${connStr}\n`;
+    if (node.description) s += `${ind}  ${L('설명','Desc')}: ${node.description}\n`;
+    const tags = node.tags||{};
     const tagNames = Object.keys(tags).filter(k => tags[k]);
-    if (tagNames.length > 0) {
-      lines.push(`${indent}  ${L('태그', 'Tags')}: ${tagNames.join(', ')}`);
-    }
-
-    // Description
-    if (node.description) {
-      lines.push(`${indent}  ${L('설명', 'Desc')}: ${node.description}`);
-    }
-
-    // Direct connections from this node
-    const outRoads = roads.filter(r => r.from === node.id);
-    const inRoads = roads.filter(r => r.to === node.id);
-
-    if (outRoads.length > 0) {
-      outRoads.forEach(road => {
-        const target = nodeMap[road.to];
-        const vt = VEHICLE_TYPES[road.vehicle] || VEHICLE_TYPES.car;
-        const dt = DATA_TYPES[road.dataType] || DATA_TYPES.content;
-        lines.push(`${indent}  → ${getBtEmoji(target?.buildingType)} ${target?.name || '?'} [${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)}]`);
-      });
-    }
-
-    if (hasChildren) {
-      renderTreeDetailed(node.children, lines, depth + 1, lang, roads, project);
-    }
+    if (tagNames.length > 0) s += `${ind}  ${L('태그','Tags')}: ${tagNames.join(', ')}\n`;
+    const outR = roads.filter(r => r.from === node.id);
+    outR.forEach(r => {
+      const tgt = nodeMap[r.to]; const vt = VEHICLE_TYPES[r.vehicle]||VEHICLE_TYPES.car; const dt = DATA_TYPES[r.dataType]||DATA_TYPES.content;
+      s += `${ind}  → ${btE(tgt?.buildingType)} ${tgt?.name||'?'} [${vt.emoji} ${L(vt.desc_ko, vt.desc_en)} | ${dt.emoji} ${L(dt.label_ko, dt.label_en)}]\n`;
+    });
+    if (node.children?.length) s += renderTreeDetailed(node.children, depth+1, roads, nodeMap, L);
   });
+  return s;
 }
 
-function renderTreeCompact(nodes, lines, depth, nodeMap) {
-  const indent = '  '.repeat(depth);
-  nodes.forEach(node => {
-    const bt = BUILDING_TYPES[node.buildingType] || BUILDING_TYPES.page;
-    lines.push(`${indent}${bt.emoji} ${node.name || '?'}`);
-    if (node.children?.length) {
-      renderTreeCompact(node.children, lines, depth + 1, nodeMap);
-    }
+function treeCompact(nodes, depth) {
+  let s = '';
+  nodes.forEach(n => {
+    const bt = BUILDING_TYPES[n.buildingType]||BUILDING_TYPES.page;
+    s += `${'  '.repeat(depth)}${bt.emoji} ${n.name||'?'}\n`;
+    if (n.children?.length) s += treeCompact(n.children, depth+1);
   });
+  return s;
 }
 
 function buildNodeMap(project) {
-  const map = {};
-  for (const col of project.columns || []) {
-    walkTree(project.structure[col.key] || [], (node) => {
-      map[node.id] = node;
-    });
-  }
-  return map;
+  const m = {};
+  for (const col of project.columns||[]) walk(project.structure[col.key]||[], n => { m[n.id] = n; });
+  return m;
 }
+function walk(nodes, cb) { for (const n of nodes) { cb(n); if (n.children?.length) walk(n.children, cb); } }
+function countAllItems(project) { let c = 0; for (const col of project.columns||[]) walk(project.structure[col.key]||[], () => c++); return c; }
+function btE(bt) { return (BUILDING_TYPES[bt]||BUILDING_TYPES.page).emoji; }
 
-function walkTree(nodes, callback) {
-  for (const n of nodes) {
-    callback(n);
-    if (n.children?.length) walkTree(n.children, callback);
-  }
-}
-
-function countAllItems(project) {
-  let count = 0;
-  for (const col of project.columns || []) {
-    walkTree(project.structure[col.key] || [], () => count++);
-  }
-  return count;
-}
-
-function getBtEmoji(buildingType) {
-  return (BUILDING_TYPES[buildingType] || BUILDING_TYPES.page).emoji;
-}
-
-export function downloadArchDoc(project, lang = 'ko') {
-  const content = exportArchitectureDoc(project, lang);
+export function downloadContent(content, filename) {
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${project?.name || 'sandroad'}_architecture.md`;
-  a.click();
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
