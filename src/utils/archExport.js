@@ -2,6 +2,7 @@
 // Supports section-by-section generation for progress UI
 
 import { BUILDING_TYPES, VEHICLE_TYPES, ROAD_TYPES, DATA_TYPES } from '../constants/unitTypes.js';
+import { ARCH_PATTERNS, ARCH_LAYERS } from '../constants/archPatterns.js';
 
 // Section definitions with weights for progress calculation
 const SECTIONS = [
@@ -15,6 +16,7 @@ const SECTIONS = [
   { id: 'integration',weight: 5,  label_ko: '연동 방식 분포',       label_en: 'Integration distribution' },
   { id: 'tree',       weight: 5,  label_ko: '계층 트리 구성',       label_en: 'Building hierarchy tree' },
   { id: 'depgraph',   weight: 5,  label_ko: '의존 관계 그래프',     label_en: 'Dependency graph' },
+  { id: 'archinfo',   weight: 8,  label_ko: '아키텍처 패턴 정보',   label_en: 'Architecture pattern info' },
   { id: 'context',    weight: 5,  label_ko: 'AI 컨텍스트 정리',     label_en: 'AI context summary' },
 ];
 
@@ -69,6 +71,7 @@ function generateSection(id, project, cols, roads, nodeMap, L, lang) {
     case 'integration': return genIntegration(roads, L);
     case 'tree': return genTree(project, cols, nodeMap, L);
     case 'depgraph': return genDepGraph(roads, nodeMap, L);
+    case 'archinfo': return genArchInfo(nodeMap, L);
     case 'context': return genContext(L);
     default: return '';
   }
@@ -221,8 +224,56 @@ function genDepGraph(roads, nodeMap, L) {
   return s;
 }
 
+function genArchInfo(nodeMap, L) {
+  let s = `## 9. ${L('아키텍처 패턴 정보', 'Architecture Pattern Info')}\n\n`;
+
+  // Collect patterns used
+  const patternsUsed = {};
+  const layersUsed = {};
+  for (const node of Object.values(nodeMap)) {
+    if (node.archPattern) {
+      if (!patternsUsed[node.archPattern]) patternsUsed[node.archPattern] = [];
+      patternsUsed[node.archPattern].push(node.name);
+    }
+    if (node.archLayer) {
+      if (!layersUsed[node.archLayer]) layersUsed[node.archLayer] = [];
+      layersUsed[node.archLayer].push(node.name);
+    }
+  }
+
+  if (Object.keys(patternsUsed).length === 0 && Object.keys(layersUsed).length === 0) {
+    s += `_(${L('아키텍처 패턴 미지정. /mvc, /redux 등 슬래시 명령어로 지정 가능', 'No patterns set. Use /mvc, /redux etc. slash commands')})_\n\n`;
+    return s;
+  }
+
+  if (Object.keys(patternsUsed).length > 0) {
+    s += `### ${L('적용된 패턴', 'Applied Patterns')}\n\n`;
+    for (const [pk, nodes] of Object.entries(patternsUsed)) {
+      const info = ARCH_PATTERNS[pk];
+      if (!info) continue;
+      s += `**🏗️ ${info.label}** — ${L(info.desc_ko, info.desc_en)}\n`;
+      s += `${L('적용 대상', 'Applied to')}: ${nodes.join(', ')}\n`;
+      s += `${L('계층 구조', 'Layers')}: ${info.layers.join(' → ')}\n\n`;
+    }
+  }
+
+  if (Object.keys(layersUsed).length > 0) {
+    s += `### ${L('아키텍처 레이어 매핑', 'Architecture Layer Mapping')}\n\n`;
+    s += `| ${L('레이어', 'Layer')} | ${L('역할', 'Role')} | ${L('적용 노드', 'Nodes')} |\n`;
+    s += '|--------|------|-------|\n';
+    for (const [lk, nodes] of Object.entries(layersUsed)) {
+      const info = ARCH_LAYERS[lk];
+      if (!info) continue;
+      s += `| 📐 ${info.label} | ${L(info.desc_ko, info.desc_en)} | ${nodes.join(', ')} |\n`;
+    }
+    s += '\n';
+  }
+
+  return s;
+}
+
 function genContext(L) {
-  let s = `## 9. ${L('AI 개발 지시용 컨텍스트', 'AI Development Context')}\n\n`;
+  let s = `## 10. ${L('AI 개발 지시용 컨텍스트', 'AI Development Context')}\n\n`;
   s += L(
     `이 문서를 AI에게 제공하면 다음을 파악할 수 있습니다:\n\n- **화면 구조**: 페이지/컴포넌트 계층과 역할\n- **데이터 흐름**: 어디서 어디로 어떤 데이터가 이동하는지\n- **연동 방식**: REST, WebSocket, 배치 등 각 연결의 기술 스택\n- **인프라 구성**: DB, 캐시, 큐, 스토리지 등의 배치\n- **외부 연동**: 서드파티 API 연결 포인트\n- **보안 경로**: 인증/권한 체크 흐름\n`,
     `Providing this document to AI enables:\n\n- **Screen structure**: Page/component hierarchy and roles\n- **Data flow**: What data moves where\n- **Integration methods**: REST, WebSocket, batch tech stack per connection\n- **Infrastructure**: DB, cache, queue, storage placement\n- **External integrations**: Third-party API points\n- **Security paths**: Auth/permission flows\n`
@@ -245,6 +296,8 @@ function renderTreeDetailed(nodes, depth, roads, nodeMap, L) {
     const tags = node.tags||{};
     const tagNames = Object.keys(tags).filter(k => tags[k]);
     if (tagNames.length > 0) s += `${ind}  ${L('태그','Tags')}: ${tagNames.join(', ')}\n`;
+    if (node.archPattern) { const ap = ARCH_PATTERNS[node.archPattern]; if (ap) s += `${ind}  🏗️ ${L('패턴','Pattern')}: ${ap.label} (${L(ap.desc_ko, ap.desc_en)})\n`; }
+    if (node.archLayer) { const al = ARCH_LAYERS[node.archLayer]; if (al) s += `${ind}  📐 ${L('레이어','Layer')}: ${al.label} (${L(al.desc_ko, al.desc_en)})\n`; }
     const outR = roads.filter(r => r.from === node.id);
     outR.forEach(r => {
       const tgt = nodeMap[r.to]; const vt = VEHICLE_TYPES[r.vehicle]||VEHICLE_TYPES.car; const dt = DATA_TYPES[r.dataType]||DATA_TYPES.content;
@@ -259,7 +312,8 @@ function treeCompact(nodes, depth) {
   let s = '';
   nodes.forEach(n => {
     const bt = BUILDING_TYPES[n.buildingType]||BUILDING_TYPES.page;
-    s += `${'  '.repeat(depth)}${bt.emoji} ${n.name||'?'}\n`;
+    const layerTag = n.archLayer ? ` [📐${ARCH_LAYERS[n.archLayer]?.label||''}]` : '';
+    s += `${'  '.repeat(depth)}${bt.emoji} ${n.name||'?'}${layerTag}\n`;
     if (n.children?.length) s += treeCompact(n.children, depth+1);
   });
   return s;
