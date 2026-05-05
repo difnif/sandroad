@@ -16,6 +16,7 @@ import ActionTimeline from '../components/graph/ActionTimeline.jsx';
 import ConsultBar from '../components/graph/ConsultBar.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 import ArchPanel from '../components/city/ArchPanel.jsx';
+import { applySlashCommands, getCommandSuggestions } from '../utils/slashCommands.js';
 
 export default function CityViewScreen() {
   const navigate = useNavigate();
@@ -30,6 +31,7 @@ export default function CityViewScreen() {
   const [selectedRoadId, setSelectedRoadId] = useState(null);
   const [inlineEditId, setInlineEditId] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState('');
+  const [slashSuggestions, setSlashSuggestions] = useState([]);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [consultCollapsed, setConsultCollapsed] = useState(true);
   const [archPanelCollapsed, setArchPanelCollapsed] = useState(true);
@@ -146,13 +148,56 @@ export default function CityViewScreen() {
     if (!inlineEditId || !project) return;
     const node = findNode(inlineEditId);
     if (!node) { setInlineEditId(null); return; }
-    const newName = inlineEditValue.trim() || node.name;
-    if (newName !== node.name) {
+
+    const input = inlineEditValue.trim();
+    const slashResult = applySlashCommands(input);
+
+    if (slashResult.handled) {
+      // Slash command detected — apply type/pattern changes + name
       saveSnapshot();
-      updateLocal(p => ({ ...p, structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], inlineEditId, { name: newName }) } }));
-      record(ACTION_TYPES.RENAME, { nodeId: inlineEditId, from: node.name, to: newName });
+      const updates = { ...slashResult.updates };
+      const newName = slashResult.displayName || node.name;
+      if (newName !== node.name) updates.name = newName;
+      updateLocal(p => ({
+        ...p,
+        structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], inlineEditId, updates) }
+      }));
+      const cmdList = input.match(/\/\w+/g)?.join(' ') || '';
+      record(ACTION_TYPES.RENAME, { nodeId: inlineEditId, from: node.name, to: `${newName} [${cmdList}]` });
+    } else {
+      // Normal name edit
+      const newName = input || node.name;
+      if (newName !== node.name) {
+        saveSnapshot();
+        updateLocal(p => ({ ...p, structure: { ...p.structure, [node.col]: updateInTree(p.structure[node.col] || [], inlineEditId, { name: newName }) } }));
+        record(ACTION_TYPES.RENAME, { nodeId: inlineEditId, from: node.name, to: newName });
+      }
     }
     setInlineEditId(null);
+    setSlashSuggestions([]);
+  };
+
+  // Update suggestions as user types
+  const handleInlineEditChange = (e) => {
+    const val = e.target.value;
+    setInlineEditValue(val);
+    // Check for slash at current cursor position
+    const words = val.split(/\s+/);
+    const lastWord = words[words.length - 1];
+    if (lastWord && lastWord.startsWith('/') && lastWord.length > 1) {
+      setSlashSuggestions(getCommandSuggestions(lastWord, lang));
+    } else {
+      setSlashSuggestions([]);
+    }
+  };
+
+  const applySuggestion = (cmd) => {
+    // Replace the last /word with the full command
+    const words = inlineEditValue.split(/\s+/);
+    words[words.length - 1] = cmd;
+    setInlineEditValue(words.join(' ') + ' ');
+    setSlashSuggestions([]);
+    inlineInputRef.current?.focus();
   };
 
   // Position confirm
@@ -355,16 +400,50 @@ export default function CityViewScreen() {
 
             {/* Inline edit */}
             {inlineEditId && (
-              <div className="absolute inset-0 flex items-center justify-center z-30" onClick={() => setInlineEditId(null)}>
+              <div className="absolute inset-0 flex items-center justify-center z-30" onClick={() => { setInlineEditId(null); setSlashSuggestions([]); }}>
                 <div className={`${theme.bgPanel} border-2 ${theme.borderStrong} rounded-lg shadow-xl p-4 w-[90vw] max-w-sm`} onClick={e => e.stopPropagation()}>
-                  <div className={`text-xs ${theme.textMuted} mb-2 ${monoCls}`}>{lang === 'ko' ? '항목 이름 수정' : 'Edit name'}</div>
-                  <input ref={inlineInputRef} type="text" value={inlineEditValue}
-                    onChange={e => setInlineEditValue(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') commitInlineEdit(); if (e.key === 'Escape') setInlineEditId(null); }}
-                    className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none ${monoCls} ${theme.input}`} />
+                  <div className={`text-xs ${theme.textMuted} mb-2 ${monoCls}`}>
+                    {lang === 'ko' ? '이름 또는 /명령어 입력' : 'Name or /command'}
+                  </div>
+                  <div className="relative">
+                    <input ref={inlineInputRef} type="text" value={inlineEditValue}
+                      onChange={handleInlineEditChange}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && slashSuggestions.length === 0) commitInlineEdit();
+                        if (e.key === 'Enter' && slashSuggestions.length > 0) { applySuggestion(slashSuggestions[0].command); e.preventDefault(); }
+                        if (e.key === 'Escape') { setInlineEditId(null); setSlashSuggestions([]); }
+                        if (e.key === 'Tab' && slashSuggestions.length > 0) { applySuggestion(slashSuggestions[0].command); e.preventDefault(); }
+                      }}
+                      placeholder={lang === 'ko' ? '/api UserService 또는 /redux /model DataStore' : '/api UserService or /redux /model DataStore'}
+                      className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none ${monoCls} ${theme.input}`} />
+
+                    {/* Slash command autocomplete */}
+                    {slashSuggestions.length > 0 && (
+                      <div className={`absolute left-0 right-0 top-full mt-1 ${theme.bgPanel} border ${theme.border} rounded-lg shadow-xl max-h-[180px] overflow-y-auto z-40`}>
+                        {slashSuggestions.map((s, i) => (
+                          <button key={s.command}
+                            onClick={() => applySuggestion(s.command)}
+                            className={`w-full px-3 py-1.5 text-left flex items-center gap-2 ${i === 0 ? theme.bgAlt : ''} hover:${theme.bgHover}`}>
+                            <span className={`text-[11px] font-bold ${theme.text} ${monoCls}`}>{s.command}</span>
+                            <span className={`text-[9px] ${theme.textMuted} flex-1 truncate`}>{s.hint}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Slash command hint */}
+                  <div className={`mt-2 text-[9px] ${theme.textDim} ${monoCls} leading-relaxed`}>
+                    {lang === 'ko'
+                      ? '💡 /api, /db, /auth → 건물 유형 | /mvc, /redux → 패턴 | /model, /store → 레이어'
+                      : '💡 /api, /db, /auth → type | /mvc, /redux → pattern | /model, /store → layer'}
+                  </div>
+
                   <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={() => setInlineEditId(null)} className={`px-3 py-1.5 text-xs font-medium border rounded-md ${theme.button}`}>{t.cancel}</button>
-                    <button onClick={commitInlineEdit} className={`px-3 py-1.5 text-xs font-medium rounded-md ${theme.buttonPrimary}`}>OK</button>
+                    <button onClick={() => { setInlineEditId(null); setSlashSuggestions([]); }}
+                      className={`px-3 py-1.5 text-xs font-medium border rounded-md ${theme.button}`}>{t.cancel}</button>
+                    <button onClick={commitInlineEdit}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md ${theme.buttonPrimary}`}>OK</button>
                   </div>
                 </div>
               </div>
