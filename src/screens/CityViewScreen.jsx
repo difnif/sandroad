@@ -300,15 +300,15 @@ export default function CityViewScreen() {
         <button onClick={() => setShowCodeWizard(true)} disabled={!project}
           className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${theme.button}`}
           title={lang === 'ko' ? '코드 분석' : 'Code analysis'}>
-          <Upload size={12} /> {lang === 'ko' ? '코드분석' : 'analyze'}
+          <Upload size={14} /> <span className="hidden sm:inline">{lang === 'ko' ? '코드분석' : 'analyze'}</span>
         </button>
         <button onClick={() => { setArchPanelCollapsed(p => { if (p) setConsultCollapsed(true); return !p; }); }} disabled={!project}
           className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${!archPanelCollapsed ? theme.buttonPrimary : theme.button}`}
           title={lang === 'ko' ? '아키텍처 명세서' : 'Architecture spec'}>
-          <FileDown size={12} /> {lang === 'ko' ? '명세서' : 'spec'}
+          <FileDown size={14} /> <span className="hidden sm:inline">{lang === 'ko' ? '명세서' : 'spec'}</span>
         </button>
         <button onClick={() => navigate('/')} className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded ${monoCls} ${theme.button}`}>
-          <Edit3 size={12} /> editor
+          <Edit3 size={14} /> <span className="hidden sm:inline">editor</span>
         </button>
         <button onClick={logout} className={`px-2.5 py-1 text-xs font-medium border rounded ${monoCls} ${theme.button}`}>
           {t.logout}
