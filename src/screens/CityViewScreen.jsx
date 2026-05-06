@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Edit3, Undo2, Redo2, FileDown, Upload } from 'lucide-react';
+import { Edit3, Undo2, Redo2, FileDown, Upload, Search } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useActions, ACTION_TYPES } from '../contexts/ActionContext.jsx';
@@ -17,6 +17,7 @@ import ConsultBar from '../components/graph/ConsultBar.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 import ArchPanel from '../components/city/ArchPanel.jsx';
 import CodeAnalysisWizard from '../components/city/CodeAnalysisWizard.jsx';
+import InspectionPanel from '../components/city/InspectionPanel.jsx';
 import { applySlashCommands, getCommandSuggestions } from '../utils/slashCommands.js';
 
 export default function CityViewScreen() {
@@ -37,6 +38,7 @@ export default function CityViewScreen() {
   const [consultCollapsed, setConsultCollapsed] = useState(true);
   const [archPanelCollapsed, setArchPanelCollapsed] = useState(true);
   const [showCodeWizard, setShowCodeWizard] = useState(false);
+  const [showInspection, setShowInspection] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -302,6 +304,11 @@ export default function CityViewScreen() {
           title={lang === 'ko' ? '코드 분석' : 'Code analysis'}>
           <Upload size={14} /> <span className="hidden sm:inline">{lang === 'ko' ? '코드분석' : 'analyze'}</span>
         </button>
+        <button onClick={() => setShowInspection(true)} disabled={!project}
+          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${theme.button}`}
+          title={lang === 'ko' ? '구조 검사' : 'Inspect structure'}>
+          <Search size={14} /> <span className="hidden sm:inline">{lang === 'ko' ? '검사' : 'inspect'}</span>
+        </button>
         <button onClick={() => { setArchPanelCollapsed(p => { if (p) setConsultCollapsed(true); return !p; }); }} disabled={!project}
           className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded disabled:opacity-40 ${monoCls} ${!archPanelCollapsed ? theme.buttonPrimary : theme.button}`}
           title={lang === 'ko' ? '아키텍처 명세서' : 'Architecture spec'}>
@@ -537,6 +544,13 @@ export default function CityViewScreen() {
           project={project}
           onApplyResult={handleCodeAnalysisResult}
           onClose={() => setShowCodeWizard(false)}
+        />
+      )}
+
+      {showInspection && (
+        <InspectionPanel
+          project={project}
+          onClose={() => setShowInspection(false)}
         />
       )}
     </div>
