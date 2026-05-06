@@ -203,13 +203,16 @@ export default function EditorScreen() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {project.columns.map(col => (
-              <Column key={col.key} column={col} items={project.structure[col.key] || []} expanded={expanded}
+            {project.columns.map((col, colIdx) => (
+              <Column key={col.key} column={col} columnIndex={colIdx} items={project.structure[col.key] || []} expandedIds={expanded}
+                selectedIds={new Set()} onToggleSelect={() => {}}
                 onUpdateColumn={handleUpdateColumn} onRequestDeleteColumn={handleRequestDeleteColumn}
                 onAddRoot={handleAddRoot} onPasteToRoot={handlePasteToRoot} hasClipboard={!!clipboard}
                 onToggleExpand={handleToggleExpand} onUpdateNode={handleUpdateNode} onToggleTag={handleToggleTag}
                 onAddChild={handleAddChild} onCopy={handleCopy} onPasteAsChild={handlePasteAsChild}
-                onRequestDelete={handleRequestDelete} />
+                onRequestDelete={handleRequestDelete}
+                onOutdent={() => {}} onIndent={() => {}} onMoveUp={() => {}} onMoveDown={() => {}}
+                onExportColumn={() => handleExport()} />
             ))}
             {project.columns.length < MAX_COLUMNS && <AddColumnCard onAdd={handleAddColumn} />}
           </div>
