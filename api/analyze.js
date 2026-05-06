@@ -1,6 +1,5 @@
 // Vercel Serverless: /api/analyze
-// Multi-step code analysis endpoint
-// Each step receives previous context + new data
+// Multi-step: scan, analyze, compare, verify, notes, inspect
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -17,152 +16,88 @@ export default async function handler(req, res) {
 
   try {
     const { system, user } = buildPrompt(step, data);
-
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        system,
-        messages: [{ role: 'user', content: user }]
-      })
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 4096, system, messages: [{ role: 'user', content: user }] })
     });
-
-    if (!response.ok) {
-      const err = await response.text();
-      return res.status(response.status).json({ error: `API ${response.status}: ${err.slice(0, 200)}` });
-    }
-
+    if (!response.ok) { const err = await response.text(); return res.status(response.status).json({ error: `API ${response.status}: ${err.slice(0, 200)}` }); }
     const result = await response.json();
     const text = result.content?.[0]?.text || '';
-
-    // Try to extract JSON from response
     let parsed = null;
-    try {
-      const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const jsonStr = jsonMatch[1] || jsonMatch[0];
-        parsed = JSON.parse(jsonStr);
-      }
-    } catch {}
-
+    try { const m = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[1] || m[0]); } catch {}
     return res.status(200).json({ text, parsed });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
+  } catch (err) { return res.status(500).json({ error: err.message }); }
 }
 
 function buildPrompt(step, data) {
+  const lang = data?.lang || 'ko';
+  const L = lang === 'ko';
+
   switch (step) {
     case 'scan':
       return {
-        system: `You are a code architecture analyzer. Given a list of files and package.json, identify:
-1. The framework/libraries used
-2. Architecture pattern (MVC, Redux, Clean, etc.)
-3. Key structural files to analyze further (routes, models, API definitions, configs)
-4. Initial project structure estimation
-
-Respond ONLY in JSON:
-{
-  "framework": "React/Next.js/Vue/etc",
-  "detectedPattern": "mvc/redux/clean/layered/etc or null",
-  "keyFiles": ["path1", "path2", ...],  // max 20 most important files
-  "structure": {
-    "pages": ["file paths"],
-    "api": ["file paths"],
-    "models": ["file paths"],
-    "components": ["file paths"],
-    "config": ["file paths"],
-    "other": ["file paths"]
-  },
-  "summary": "Brief 2-line description of the project"
-}`,
+        system: `You analyze code projects. Given file list + package.json, identify framework, pattern, key files. Respond ONLY in JSON:
+{"framework":"...","detectedPattern":"mvc/redux/clean/etc or null","keyFiles":["path"...],"structure":{"pages":[],"api":[],"models":[],"components":[],"config":[],"other":[]},"summary":"brief description"}`,
         user: `File list:\n${data.fileList}\n\npackage.json:\n${data.packageJson || 'not found'}`
       };
 
     case 'analyze':
       return {
-        system: `You are a code architecture analyzer for the "sandroad" tool.
-Given source files and a previous scan summary, generate a complete project structure.
+        system: `You analyze source code for "sandroad" tool. Building types: page,component,api,db,auth,storage,noti,payment,analytics,cache,queue,external,config. Respond ONLY in JSON:
+{"columns":[{"label":"name","color":"sand/clay/river/moss/brick/sky"}],"items":[{"column":0,"name":"...","parentName":null,"buildingType":"page","description":"..."}],"roads":[{"from":"name","to":"name","roadType":"main/sub","vehicle":"car/drone/truck","dataType":"content/user/auth","label":""}],"detectedPattern":"...","summary":"..."}`,
+        user: `Scan:\n${data.scanSummary}\n\nFiles:\n${data.fileContents}`
+      };
 
-Building types: page, component, api, db, auth, storage, noti, payment, analytics, cache, queue, external, config
-Vehicle types (connection method): car (REST sync), drone (WebSocket), worker (manual), truck (batch/upload), bike (polling), train (cron), ambulance (error handling), police (auth check)
-Data types: user, content, auth, file, noti, payment, analytics, state
-Road types: highway (core pipeline), main (major API), sub (internal), tunnel (background)
-Architecture patterns: mvc, mvp, mvvm, redux, mvi, clean, fsd, hexagonal, layered, microservice
-Architecture layers: model, view, controller, presenter, viewmodel, store, reducer, entity, usecase, adapter, etc.
+    case 'compare':
+      return {
+        system: `You compare a code analysis result with an existing sandroad project structure.
+For each item in the code analysis, determine if it matches an existing item, is new, or is a renamed version.
+For connections (roads), find which exist and which are missing.
+
+Use ${L ? 'Korean' : 'English'} for descriptions.
 
 Respond ONLY in JSON:
 {
-  "columns": [
-    { "label": "column name", "color": "sand/clay/river/moss/brick/sky" }
+  "matched": [
+    { "codeName": "from code", "sandName": "from sandroad", "confidence": "high/medium/low", "note": "why matched" }
   ],
-  "items": [
-    {
-      "column": 0,
-      "name": "item name",
-      "parentName": null or "parent item name",
-      "buildingType": "page/api/db/etc",
-      "archPattern": null or "redux/mvc/etc",
-      "archLayer": null or "model/view/etc",
-      "description": "brief description"
-    }
+  "newItems": [
+    { "name": "...", "buildingType": "...", "parentName": null, "column": 0, "description": "..." }
   ],
-  "roads": [
-    {
-      "from": "item name",
-      "to": "item name",
-      "roadType": "main/sub/highway/tunnel",
-      "vehicle": "car/drone/truck/etc",
-      "dataType": "user/content/auth/etc",
-      "label": "optional description"
-    }
+  "possibleRenames": [
+    { "codeName": "...", "sandName": "...", "reason": "why might be same" }
   ],
-  "detectedPattern": "mvc/redux/etc or null",
-  "summary": "architecture summary"
+  "missingConnections": [
+    { "from": "item name", "to": "item name", "vehicle": "car/drone/etc", "dataType": "content/user/etc", "reason": "found in code import/route" }
+  ],
+  "existingConnections": [
+    { "from": "...", "to": "...", "note": "already connected" }
+  ],
+  "summary": "brief comparison summary"
 }`,
-        user: `Previous scan:\n${data.scanSummary}\n\nSource files:\n${data.fileContents}`
+        user: `Code analysis result:\n${data.codeStructure}\n\nExisting sandroad project:\n${data.sandStructure}`
       };
 
     case 'verify':
       return {
-        system: `You are reviewing a generated architecture structure. The user has feedback.
-Based on their feedback, suggest modifications to the structure.
-
-Respond ONLY in JSON:
-{
-  "addItems": [{ "column": 0, "name": "...", "parentName": null, "buildingType": "...", "description": "..." }],
-  "removeItems": ["item name", ...],
-  "addRoads": [{ "from": "...", "to": "...", "roadType": "...", "vehicle": "...", "dataType": "..." }],
-  "removeRoads": [{ "from": "...", "to": "..." }],
-  "warnings": ["potential issue 1", ...],
-  "notes": "summary of changes"
-}`,
-        user: `Current structure:\n${data.currentStructure}\n\nUser feedback: ${data.feedback}`
+        system: `Review architecture structure with user feedback. Respond ONLY in JSON:
+{"addItems":[{"column":0,"name":"...","parentName":null,"buildingType":"...","description":"..."}],"removeItems":["name"],"addRoads":[{"from":"...","to":"...","roadType":"...","vehicle":"...","dataType":"..."}],"removeRoads":[{"from":"...","to":"..."}],"notes":"summary"}`,
+        user: `Structure:\n${data.currentStructure}\n\nFeedback: ${data.feedback}`
       };
 
     case 'notes':
       return {
-        system: `You are organizing development requirements and notes for a project.
-Given the project structure and user's raw notes, organize them into clear categories.
+        system: `Organize development notes into categories. Respond ONLY in JSON:
+{"devNotes":[{"category":"requirement/constraint/integration/design/performance/security","content":"...","priority":"high/medium/low"}],"summary":"..."}`,
+        user: `Structure:\n${data.structureSummary}\n\nNotes:\n${data.rawNotes}`
+      };
 
-Respond ONLY in JSON:
-{
-  "devNotes": [
-    {
-      "category": "requirement/constraint/integration/design/performance/security",
-      "content": "organized note text",
-      "priority": "high/medium/low"
-    }
-  ],
-  "summary": "brief overall summary"
-}`,
-        user: `Project structure summary:\n${data.structureSummary}\n\nUser notes:\n${data.rawNotes}`
+    case 'inspect':
+      return {
+        system: `Analyze project architecture and suggest patterns. Use ${L ? 'Korean' : 'English'}. Respond ONLY in JSON:
+{"patterns":[{"name":"MVC/MVVM/Redux/Clean/etc","confidence":"high/medium/low","reason":"why fits","changes":["change1","change2"]}],"generalAdvice":"overall advice","missingElements":["..."],"conflictingConnections":["..."]}`,
+        user: `Structure:\n${data.structureSummary}\n\nLocal inspection:\n${data.localResults}`
       };
 
     default:
