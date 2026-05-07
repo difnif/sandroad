@@ -152,21 +152,29 @@ export default function CityCanvas({
     const draw = () => {
       if (!running) return;
       const canvas = canvasRef.current; if (!canvas) { animFrameRef.current = requestAnimationFrame(draw); return; }
+      // Safety: skip frame if viewState has bad values
+      const vs = viewState;
+      if (!vs || !isFinite(vs.zoom) || !isFinite(vs.panX) || !isFinite(vs.panY) || vs.zoom <= 0) {
+        animFrameRef.current = requestAnimationFrame(draw); return;
+      }
+      // Safety: minimum canvas size
+      const cw = Math.max(canvasSize.w, 100), ch = Math.max(canvasSize.h, 100);
+      try {
       const ctx = canvas.getContext('2d');
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = canvasSize.w*dpr; canvas.height = canvasSize.h*dpr;
-      canvas.style.width = canvasSize.w+'px'; canvas.style.height = canvasSize.h+'px';
+      canvas.width = cw*dpr; canvas.height = ch*dpr;
+      canvas.style.width = cw+'px'; canvas.style.height = ch+'px';
       ctx.scale(dpr, dpr);
 
       ctx.fillStyle = themeId === 'dark' ? '#1e1e1e' : themeId === 'light' ? '#f8f8f8' : '#fef7e0';
-      ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
+      ctx.fillRect(0, 0, cw, ch);
 
       ctx.save();
       ctx.translate(viewState.panX, viewState.panY);
       ctx.scale(viewState.zoom, viewState.zoom);
 
       // Always-visible grid
-      drawGrid(ctx, viewState, canvasSize, themeId, dragState?.phase === 'dragging');
+      drawGrid(ctx, viewState, {w: cw, h: ch}, themeId, dragState?.phase === 'dragging');
 
       // Districts
       layout.districts.forEach((dist, idx) => {
@@ -310,6 +318,7 @@ export default function CityCanvas({
       }
 
       ctx.restore();
+      } catch (err) { console.warn('CityCanvas draw error:', err); }
       animFrameRef.current = requestAnimationFrame(draw);
     };
     draw();
@@ -404,7 +413,7 @@ export default function CityCanvas({
   const handleTouchStart = (e) => { if (dragState?.phase === 'dropped') return; if (e.touches.length === 1) { const t = e.touches[0]; if (!dragState?.phase) startLongPress(t.clientX, t.clientY); isPanning.current = true; panStart.current = { x: t.clientX-viewState.panX, y: t.clientY-viewState.panY }; } else if (e.touches.length === 2) { clearLongPress(); isPanning.current = false; lastTouchDist.current = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); lastTouchCenter.current = { x: (e.touches[0].clientX+e.touches[1].clientX)/2, y: (e.touches[0].clientY+e.touches[1].clientY)/2 }; } };
   const handleTouchMove = (e) => { e.preventDefault(); if (longPressTarget.current && e.touches.length === 1) { const t = e.touches[0]; if (Math.hypot(t.clientX-longPressTarget.current.startClientX, t.clientY-longPressTarget.current.startClientY) > 8) clearLongPress(); } if (e.touches.length === 1) { const t = e.touches[0]; if (dragState?.phase === 'dragging') { const w = screenToWorld(t.clientX, t.clientY); setDragState(prev => prev ? { ...prev, currentX: snapToGrid(w.x-(prev.itemW||0)/2), currentY: snapToGrid(w.y-(prev.itemH||0)/2) } : null); return; } if (isPanning.current) setViewState(prev => clampView({ ...prev, panX: t.clientX-panStart.current.x, panY: t.clientY-panStart.current.y }, canvasSize, layout)); } else if (e.touches.length === 2) { const dist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); if (lastTouchDist.current > 0) { const s = 1+(dist/lastTouchDist.current-1)*0.5; setViewState(prev => clampView({ ...prev, zoom: Math.max(0.3, Math.min(4, prev.zoom*s)) }, canvasSize, layout)); } lastTouchDist.current = dist; const c = { x: (e.touches[0].clientX+e.touches[1].clientX)/2, y: (e.touches[0].clientY+e.touches[1].clientY)/2 }; if (lastTouchCenter.current) setViewState(prev => clampView({ ...prev, panX: prev.panX+(c.x-lastTouchCenter.current.x), panY: prev.panY+(c.y-lastTouchCenter.current.y) }, canvasSize, layout)); lastTouchCenter.current = c; } };
   const handleTouchEnd = (e) => { clearLongPress(); if (dragState?.phase === 'dragging') { setDragState(prev => prev ? { ...prev, phase: 'dropped' } : null); isPanning.current = false; return; } if (isPanning.current && e.changedTouches.length === 1 && !dragState) { const t = e.changedTouches[0]; const dx = Math.abs(t.clientX-(panStart.current.x+viewState.panX)); const dy = Math.abs(t.clientY-(panStart.current.y+viewState.panY)); if (dx < 10 && dy < 10) { const w = screenToWorld(t.clientX, t.clientY); const hit = hitTest(w.x, w.y); const now = Date.now(); if (roadMode) { if (hit) { if (!roadFrom) setRoadFrom(hit.id); else if (hit.id !== roadFrom) { onRoadCreate?.(roadFrom, hit.id, roadType, roadVehicle); setRoadFrom(null); setRoadMode(false); } } else setRoadFrom(null); } else if (hit) { if (now-lastTapTime.current < 400 && selectedId === hit.id) { const item = layout.allItems.find(i => i.id === hit.id) || layout.unplacedItems.find(i => i.id === hit.id); if (item) setDragState({ itemId: item.id, origX: item.x, origY: item.y, currentX: item.x, currentY: item.y, itemW: item.w, itemH: item.h, phase: 'dragging', isUnplaced: item.placed === false }); } else { onSelectNode?.(hit.id); onRoadSelect?.(null); } } else { onSelectNode?.(null); onRoadSelect?.(null); } lastTapTime.current = now; } } isPanning.current = false; lastTouchDist.current = 0; lastTouchCenter.current = null; };
-  const handleWheel = (e) => { e.preventDefault(); if (dragState) return; const f = e.deltaY > 0 ? 0.95 : 1.05; setViewState(prev => { const nz = Math.max(0.3, Math.min(4, prev.zoom*f)); const cx = canvasSize.w/2, cy = canvasSize.h/2; const r = nz/prev.zoom; return clampView({ zoom: nz, panX: cx-(cx-prev.panX)*r, panY: cy-(cy-prev.panY)*r }, canvasSize, layout); }); };
+  const handleWheel = (e) => { e.preventDefault(); if (dragState) return; const f = e.deltaY > 0 ? 0.95 : 1.05; setViewState(prev => { if (!prev.zoom || prev.zoom <= 0) return prev; const nz = Math.max(0.3, Math.min(4, prev.zoom*f)); const cx = Math.max(canvasSize.w, 100)/2, cy = Math.max(canvasSize.h, 100)/2; const r = nz/prev.zoom; if (!isFinite(r)) return prev; return clampView({ zoom: nz, panX: cx-(cx-prev.panX)*r, panY: cy-(cy-prev.panY)*r }, canvasSize, layout); }); };
 
   const handleConfirm = () => { if (dragState?.phase !== 'dropped') return; if (dragState.isUnplaced) onPlaceItem?.(dragState.itemId, { x: dragState.currentX, y: dragState.currentY }); else onPositionConfirm?.(dragState.itemId, { x: dragState.currentX, y: dragState.currentY }); setDragState(null); };
   const handleCancel = () => setDragState(null);
@@ -416,7 +425,7 @@ export default function CityCanvas({
 
   return (
     <div ref={containerRef} className="w-full h-full relative" style={{ touchAction: 'none' }}>
-      <canvas ref={canvasRef} className="absolute inset-0"
+      <canvas ref={canvasRef} className="absolute inset-0" style={{ touchAction: 'none' }}
         style={{ cursor: roadMode ? 'crosshair' : dragState?.phase === 'dragging' ? 'grabbing' : 'grab' }}
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
         onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
@@ -498,6 +507,9 @@ function drawGrid(ctx, vs, cs, t, snap) {
   const step = 50;
   const sx = Math.floor((-vs.panX/vs.zoom-500)/step)*step, sy = Math.floor((-vs.panY/vs.zoom-500)/step)*step;
   const ex = sx+cs.w/vs.zoom+1000, ey = sy+cs.h/vs.zoom+1000;
+  // Safety: cap at 200 lines per axis
+  const maxLines = 200;
+  if ((ex-sx)/step > maxLines || (ey-sy)/step > maxLines) return;
   ctx.strokeStyle = baseColor; ctx.lineWidth = 0.5;
   for (let x = sx; x < ex; x += step) { ctx.beginPath(); ctx.moveTo(x, sy); ctx.lineTo(x, ey); ctx.stroke(); }
   for (let y = sy; y < ey; y += step) { ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(ex, y); ctx.stroke(); }
@@ -507,6 +519,7 @@ function drawGrid(ctx, vs, cs, t, snap) {
     const ss = GRID_SIZE;
     const ssx = Math.floor((-vs.panX/vs.zoom-200)/ss)*ss, ssy = Math.floor((-vs.panY/vs.zoom-200)/ss)*ss;
     const sex = ssx+cs.w/vs.zoom+400, sey = ssy+cs.h/vs.zoom+400;
+    if ((sex-ssx)/ss > maxLines || (sey-ssy)/ss > maxLines) return;
     ctx.strokeStyle = snapColor; ctx.lineWidth = 0.4;
     for (let x = ssx; x < sex; x += ss) { ctx.beginPath(); ctx.moveTo(x, ssy); ctx.lineTo(x, sey); ctx.stroke(); }
     for (let y = ssy; y < sey; y += ss) { ctx.beginPath(); ctx.moveTo(ssx, y); ctx.lineTo(sex, y); ctx.stroke(); }
@@ -563,6 +576,6 @@ function drawRoadLine(ctx, f, t, road, c, th, sel) {
   ctx.setLineDash([]); ctx.globalAlpha = 1;
 }
 function roundedRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath(); }
-function clampView(v, cs, layout) { if (!layout.districts.length) return v; const b = getLayoutBounds(layout); const bw = Math.max(b.maxX-b.minX, 100), bh = Math.max(b.maxY-b.minY, 100); let { panX, panY, zoom } = v; zoom = Math.max(0.3, Math.min(4, zoom)); const m = 100; const cMinX = b.minX*zoom+panX, cMaxX = b.maxX*zoom+panX, cMinY = b.minY*zoom+panY, cMaxY = b.maxY*zoom+panY; if (cMaxX < -m) panX += (-m-cMaxX); if (cMinX > cs.w+m) panX -= (cMinX-cs.w-m); if (cMaxY < -m) panY += (-m-cMaxY); if (cMinY > cs.h+m) panY -= (cMinY-cs.h-m); return { panX, panY, zoom }; }
+function clampView(v, cs, layout) { if (!isFinite(v.zoom) || !isFinite(v.panX) || !isFinite(v.panY)) return { panX: 0, panY: 0, zoom: 1 }; if (!layout.districts.length) return v; const b = getLayoutBounds(layout); const bw = Math.max(b.maxX-b.minX, 100), bh = Math.max(b.maxY-b.minY, 100); let { panX, panY, zoom } = v; zoom = Math.max(0.3, Math.min(4, zoom)); const m = 100; const cMinX = b.minX*zoom+panX, cMaxX = b.maxX*zoom+panX, cMinY = b.minY*zoom+panY, cMaxY = b.maxY*zoom+panY; if (cMaxX < -m) panX += (-m-cMaxX); if (cMinX > cs.w+m) panX -= (cMinX-cs.w-m); if (cMaxY < -m) panY += (-m-cMaxY); if (cMinY > cs.h+m) panY -= (cMinY-cs.h-m); return { panX, panY, zoom }; }
 function getLayoutBounds(layout) { let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity; for (const d of layout.districts) { minX=Math.min(minX,d.x); minY=Math.min(minY,d.y); maxX=Math.max(maxX,d.x+d.width); maxY=Math.max(maxY,d.y+d.height); } for (const i of layout.allItems) { minX=Math.min(minX,i.x); minY=Math.min(minY,i.y); maxX=Math.max(maxX,i.x+(i.w||0)); maxY=Math.max(maxY,i.y+(i.h||0)); } for (const i of layout.unplacedItems||[]) { minX=Math.min(minX,i.x); minY=Math.min(minY,i.y); maxX=Math.max(maxX,i.x+(i.w||0)); maxY=Math.max(maxY,i.y+(i.h||0)); } return { minX, minY, maxX, maxY }; }
 function pointToSegmentDist(px, py, ax, ay, bx, by) { const dx = bx-ax, dy = by-ay; const len2 = dx*dx+dy*dy; if (len2 === 0) return Math.hypot(px-ax, py-ay); let t = ((px-ax)*dx+(py-ay)*dy)/len2; t = Math.max(0, Math.min(1, t)); return Math.hypot(px-(ax+t*dx), py-(ay+t*dy)); }
