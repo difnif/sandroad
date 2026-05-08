@@ -425,8 +425,8 @@ export default function CityCanvas({
 
   return (
     <div ref={containerRef} className="w-full h-full relative" style={{ touchAction: 'none' }}>
-      <canvas ref={canvasRef} className="absolute inset-0" style={{ touchAction: 'none' }}
-        style={{ cursor: roadMode ? 'crosshair' : dragState?.phase === 'dragging' ? 'grabbing' : 'grab' }}
+      <canvas ref={canvasRef} className="absolute inset-0"
+        style={{ touchAction: 'none', cursor: roadMode ? 'crosshair' : dragState?.phase === 'dragging' ? 'grabbing' : 'grab' }}
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
         onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
         onWheel={handleWheel} />
