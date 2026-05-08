@@ -1,5 +1,6 @@
-// Sandroad Unit Classification System v2
-// Buildings, Characters, Vehicles, Roads, Fences
+// Sandroad Unit Classification System v2 (backward-compatible)
+// Keeps original ROAD_TYPES keys (highway, main, sub, tunnel)
+// Adds: CHARACTER_TYPES, BUILDING_SIZES, FENCE_TYPES, DIRECTION_MODES, GRID
 
 // ========== BUILDING TYPES ==========
 export const BUILDING_TYPES = {
@@ -58,23 +59,29 @@ export const CHARACTER_TYPES = {
 
 // ========== DATA TYPES ==========
 export const DATA_TYPES = {
-  user:      { emoji: '👤', label_ko: '사용자 데이터', label_en: 'User Data',    color: '#3b82f6' },
-  content:   { emoji: '📦', label_ko: '콘텐츠',       label_en: 'Content',      color: '#22c55e' },
-  auth:      { emoji: '🔑', label_ko: '인증정보',     label_en: 'Auth Info',    color: '#eab308' },
-  file:      { emoji: '📁', label_ko: '파일/미디어',  label_en: 'File/Media',   color: '#a16207' },
-  noti:      { emoji: '🔔', label_ko: '알림',         label_en: 'Notification', color: '#ef4444' },
-  payment:   { emoji: '💳', label_ko: '결제정보',     label_en: 'Payment',      color: '#a855f7' },
-  analytics: { emoji: '📊', label_ko: '분석이벤트',   label_en: 'Analytics',    color: '#6b7280' },
-  state:     { emoji: '📋', label_ko: '설정/상태',    label_en: 'State/Config', color: '#f97316' },
+  user:      { emoji: '👤', label_ko: '사용자 데이터', label_en: 'User Data',    color: '#3b82f6', road_color: '#93c5fd' },
+  content:   { emoji: '📦', label_ko: '콘텐츠',       label_en: 'Content',      color: '#22c55e', road_color: '#86efac' },
+  auth:      { emoji: '🔑', label_ko: '인증정보',     label_en: 'Auth Info',    color: '#eab308', road_color: '#fde047' },
+  file:      { emoji: '📁', label_ko: '파일/미디어',  label_en: 'File/Media',   color: '#a16207', road_color: '#d4a574' },
+  noti:      { emoji: '🔔', label_ko: '알림',         label_en: 'Notification', color: '#ef4444', road_color: '#fca5a5' },
+  payment:   { emoji: '💳', label_ko: '결제정보',     label_en: 'Payment',      color: '#a855f7', road_color: '#c4b5fd' },
+  analytics: { emoji: '📊', label_ko: '분석이벤트',   label_en: 'Analytics',    color: '#6b7280', road_color: '#d1d5db' },
+  state:     { emoji: '📋', label_ko: '설정/상태',    label_en: 'State/Config', color: '#f97316', road_color: '#fdba74' },
 };
 
-// ========== ROAD TYPES (auto-upgrade thresholds) ==========
+// ========== ROAD TYPES (backward-compatible keys) ==========
+// Original keys: highway, main, sub, tunnel
+// New additions: sidewalk, street, avenue
 export const ROAD_TYPES = {
-  sidewalk: { width: 2, dash: [3, 4], label_ko: '인도',     label_en: 'Sidewalk', maxMovers: 2,  upgradesTo: 'street'  },
-  street:   { width: 4, dash: null,   label_ko: '일반도로', label_en: 'Street',   maxMovers: 5,  upgradesTo: 'avenue'  },
-  avenue:   { width: 7, dash: null,   label_ko: '대로',     label_en: 'Avenue',   maxMovers: 10, upgradesTo: 'highway' },
-  highway:  { width: 10, dash: null,  label_ko: '고속도로', label_en: 'Highway',  maxMovers: Infinity, upgradesTo: null },
-  tunnel:   { width: 4, dash: [3, 6], label_ko: '지하도',   label_en: 'Tunnel',   maxMovers: Infinity, upgradesTo: null, opacity: 0.4 },
+  // Original (used by existing code)
+  highway: { width: 10, dash: null,    label_ko: '고속도로', label_en: 'Highway',   centerLine: true,  maxMovers: Infinity, upgradesTo: null },
+  main:    { width: 6,  dash: null,    label_ko: '대로',     label_en: 'Main road', centerLine: true,  maxMovers: 10, upgradesTo: 'highway' },
+  sub:     { width: 3,  dash: [8, 4],  label_ko: '소로',     label_en: 'Sub road',  centerLine: false, maxMovers: 5,  upgradesTo: 'main' },
+  tunnel:  { width: 4,  dash: [3, 6],  label_ko: '지하도',   label_en: 'Tunnel',    centerLine: false, maxMovers: Infinity, upgradesTo: null, opacity: 0.4 },
+  // New additions
+  sidewalk:{ width: 2,  dash: [3, 4],  label_ko: '인도',     label_en: 'Sidewalk',  centerLine: false, maxMovers: 2,  upgradesTo: 'sub' },
+  street:  { width: 4,  dash: null,    label_ko: '일반도로', label_en: 'Street',    centerLine: false, maxMovers: 5,  upgradesTo: 'main' },
+  avenue:  { width: 7,  dash: null,    label_ko: '대로',     label_en: 'Avenue',    centerLine: true,  maxMovers: 10, upgradesTo: 'highway' },
 };
 
 // ========== MOVER DIRECTION MODES ==========
@@ -93,38 +100,75 @@ export const FENCE_TYPES = {
 
 // ========== GRID CONSTANTS ==========
 export const GRID = {
-  TILE_W: 128,       // base tile width
-  TILE_H: 64,        // base tile height (2:1 ratio)
-  FINE_STEP: 32,     // fine grid for area resize
-  SNAP_STEP: 128,    // building placement snap
+  TILE_W: 128,
+  TILE_H: 64,
+  FINE_STEP: 32,
+  SNAP_STEP: 128,
 };
 
-// ========== HELPERS ==========
-export function getBuildingType(k) { return BUILDING_TYPES[k] || BUILDING_TYPES.page; }
-export function getVehicleType(k) { return VEHICLE_TYPES[k] || VEHICLE_TYPES.car; }
-export function getCharacterType(k) { return CHARACTER_TYPES[k] || CHARACTER_TYPES.worker; }
-export function getDataType(k) { return DATA_TYPES[k] || DATA_TYPES.content; }
-export function getRoadType(k) { return ROAD_TYPES[k] || ROAD_TYPES.street; }
-export function getLabel(obj, lang) { return lang === 'ko' ? obj.label_ko : obj.label_en; }
-export function getDesc(obj, lang) { return lang === 'ko' ? (obj.desc_ko || '') : (obj.desc_en || ''); }
+// ========== HELPERS (all original exports preserved) ==========
 
-// Get mover type (vehicle or character)
+export function getBuildingType(typeKey) {
+  return BUILDING_TYPES[typeKey] || BUILDING_TYPES.page;
+}
+
+export function getDataType(typeKey) {
+  return DATA_TYPES[typeKey] || DATA_TYPES.content;
+}
+
+export function getVehicleType(typeKey) {
+  return VEHICLE_TYPES[typeKey] || VEHICLE_TYPES.car;
+}
+
+export function getRoadType(typeKey) {
+  return ROAD_TYPES[typeKey] || ROAD_TYPES.main;
+}
+
+export function getCharacterType(typeKey) {
+  return CHARACTER_TYPES[typeKey] || CHARACTER_TYPES.worker;
+}
+
+export function getLabel(typeObj, lang) {
+  return lang === 'ko' ? typeObj.label_ko : typeObj.label_en;
+}
+
+export function getDesc(typeObj, lang) {
+  return lang === 'ko' ? (typeObj.desc_ko || '') : (typeObj.desc_en || '');
+}
+
+export function defaultBuildingType(depth) {
+  if (depth <= 1) return 'page';
+  return 'component';
+}
+
+export function buildingTypeList() {
+  return Object.entries(BUILDING_TYPES).map(([key, val]) => ({ key, ...val }));
+}
+export function dataTypeList() {
+  return Object.entries(DATA_TYPES).map(([key, val]) => ({ key, ...val }));
+}
+export function vehicleTypeList() {
+  return Object.entries(VEHICLE_TYPES).map(([key, val]) => ({ key, ...val }));
+}
+export function roadTypeList() {
+  return Object.entries(ROAD_TYPES).map(([key, val]) => ({ key, ...val }));
+}
+
+// New helpers
 export function getMoverType(key) {
   if (VEHICLE_TYPES[key]) return { ...VEHICLE_TYPES[key], kind: 'vehicle' };
   if (CHARACTER_TYPES[key]) return { ...CHARACTER_TYPES[key], kind: 'character' };
   return { ...VEHICLE_TYPES.car, kind: 'vehicle' };
 }
 
-// Auto-determine road type by mover count
 export function autoRoadType(moverCount, isInterDistrict) {
   if (isInterDistrict && moverCount >= 3) return 'highway';
   if (moverCount <= 2) return 'sidewalk';
-  if (moverCount <= 5) return 'street';
-  if (moverCount <= 10) return 'avenue';
+  if (moverCount <= 5) return 'sub';
+  if (moverCount <= 10) return 'main';
   return 'highway';
 }
 
-// All movers (vehicles + characters) as flat list for pickers
 export function allMoverTypes() {
   return [
     ...Object.entries(VEHICLE_TYPES).map(([k, v]) => ({ key: k, kind: 'vehicle', ...v })),
