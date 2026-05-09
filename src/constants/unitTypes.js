@@ -43,6 +43,8 @@ export const VEHICLE_TYPES = {
   train:     { emoji: '🚂', label_ko: '기차',     label_en: 'Train',     desc_ko: '스케줄 배치 / cron',      desc_en: 'Scheduled batch / cron',  color: '#0ea5e9', speed: 0.8, moveStyle: 'straight' },
   ambulance: { emoji: '🚑', label_ko: '구급차',   label_en: 'Ambulance', desc_ko: '에러 핸들링 / fallback',  desc_en: 'Error handling / fallback', color: '#ef4444', speed: 1.8, moveStyle: 'straight' },
   police:    { emoji: '🚓', label_ko: '경찰차',   label_en: 'Police',    desc_ko: '인증/권한 체크',           desc_en: 'Auth/permission check',   color: '#eab308', speed: 1.3, moveStyle: 'straight' },
+  worker:    { emoji: '👷', label_ko: '인력',     label_en: 'Worker',    desc_ko: '수동 작업 / 관리자',       desc_en: 'Manual operation',        color: '#f59e0b', speed: 0.5, moveStyle: 'straight' },
+  bike:      { emoji: '🚲', label_ko: '자전거',   label_en: 'Bike',      desc_ko: '경량 polling / 이벤트',   desc_en: 'Lightweight polling',     color: '#22c55e', speed: 1.2, moveStyle: 'straight' },
 };
 
 // ========== CHARACTER TYPES (유저 액션 데이터) ==========
