@@ -182,10 +182,14 @@ export default function CityCanvas({
       const cw = Math.max(canvasSize.w, 100), ch = Math.max(canvasSize.h, 100);
       try {
       const ctx = canvas.getContext('2d');
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = cw*dpr; canvas.height = ch*dpr;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap DPR to prevent GPU crash on mobile
+      const maxCanvasDim = 4096; // max safe canvas dimension
+      const finalW = Math.min(cw * dpr, maxCanvasDim);
+      const finalH = Math.min(ch * dpr, maxCanvasDim);
+      canvas.width = finalW; canvas.height = finalH;
       canvas.style.width = cw+'px'; canvas.style.height = ch+'px';
-      ctx.scale(dpr, dpr);
+      const scaleX = finalW / cw, scaleY = finalH / ch;
+      ctx.scale(scaleX, scaleY);
 
       ctx.fillStyle = themeId === 'dark' ? '#1e1e1e' : themeId === 'light' ? '#f8f8f8' : '#fef7e0';
       ctx.fillRect(0, 0, cw, ch);
