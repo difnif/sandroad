@@ -80,6 +80,27 @@ export default function CityCanvas({
   }, [layout, canvasSize]);
 
   // Space bar pause
+
+  // Register touch & wheel events as non-passive (React events are passive by default, preventing e.preventDefault())
+  const touchHandlersRef = useRef({ start: null, move: null, end: null, wheel: null });
+  touchHandlersRef.current = { start: handleTouchStart, move: handleTouchMove, end: handleTouchEnd, wheel: handleWheel };
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const onStart = (e) => touchHandlersRef.current.start(e);
+    const onMove = (e) => { e.preventDefault(); touchHandlersRef.current.move(e); };
+    const onEnd = (e) => touchHandlersRef.current.end(e);
+    const onWheel = (e) => { e.preventDefault(); touchHandlersRef.current.wheel(e); };
+    canvas.addEventListener('touchstart', onStart, { passive: false });
+    canvas.addEventListener('touchmove', onMove, { passive: false });
+    canvas.addEventListener('touchend', onEnd, { passive: false });
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('touchstart', onStart);
+      canvas.removeEventListener('touchmove', onMove);
+      canvas.removeEventListener('touchend', onEnd);
+      canvas.removeEventListener('wheel', onWheel);
+    };
+  }, []);
   useEffect(() => {
     const handler = (e) => {
       if (e.code === 'Space' && document.activeElement?.tagName !== 'INPUT') {
@@ -427,9 +448,7 @@ export default function CityCanvas({
     <div ref={containerRef} className="w-full h-full relative" style={{ touchAction: 'none' }}>
       <canvas ref={canvasRef} className="absolute inset-0"
         style={{ touchAction: 'none', cursor: roadMode ? 'crosshair' : dragState?.phase === 'dragging' ? 'grabbing' : 'grab' }}
-        onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
-        onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
-        onWheel={handleWheel} />
+        onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} />
 
       {/* Road mode toolbar */}
       <div className="absolute top-3 right-3 flex flex-col gap-1 z-10">
