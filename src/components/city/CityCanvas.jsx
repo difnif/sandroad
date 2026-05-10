@@ -12,7 +12,7 @@ const ROAD_HIT_DIST = 8; // px distance to consider a road click
 export default function CityCanvas({
   project, themeId, selectedId, onSelectNode, onRequestInlineEdit,
   onPositionConfirm, roads, onRoadCreate, onRoadDelete, onPlaceItem,
-  onRoadSelect, selectedRoadId, paused, speed
+  onRoadSelect, selectedRoadId, paused, speed: speedProp
 }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -34,6 +34,8 @@ export default function CityCanvas({
   const animFrameRef = useRef(null);
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
+  const speedRef = useRef(speedProp);
+  speedRef.current = speedProp;
   const lastTapTime = useRef(0);
   const lastTouchDist = useRef(0);
   const lastTouchCenter = useRef(null);
@@ -266,7 +268,7 @@ export default function CityCanvas({
 
         // Animate (unless paused)
         if (!paused) {
-          anim.progress += anim.speed * (speed || 1);
+          anim.progress += anim.speed * (speedRef.current || 1);
           if (anim.progress > 1) { anim.progress = 0; anim.direction *= -1; }
         }
 
@@ -347,7 +349,7 @@ export default function CityCanvas({
     };
     draw();
     return () => { running = false; if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-  }, [layout, viewState, canvasSize, themeId, selectedId, hoveredId, project, dragState, allRoads, roadMode, roadFrom, hoveredRoadId, hoveredVehicle, selectedRoadId, paused, speed, itemMap]);
+  }, [layout, viewState, canvasSize, themeId, selectedId, hoveredId, project, dragState, allRoads, roadMode, roadFrom, hoveredRoadId, hoveredVehicle, selectedRoadId, paused, itemMap]);
 
   // ====== Pointer ======
   const handlePointerDown = (e) => {
@@ -445,7 +447,7 @@ export default function CityCanvas({
   const handleConfirm = () => { if (dragState?.phase !== 'dropped') return; if (dragState.isUnplaced) onPlaceItem?.(dragState.itemId, { x: dragState.currentX, y: dragState.currentY }); else onPositionConfirm?.(dragState.itemId, { x: dragState.currentX, y: dragState.currentY }); setDragState(null); };
   const handleCancel = () => setDragState(null);
 
-  const confirmPos = dragState?.phase === 'dropped' ? {
+  const confirmPos = (dragState?.phase === 'dropped' && dragState.currentX != null && dragState.currentY != null) ? {
     x: dragState.currentX*viewState.zoom + viewState.panX + (dragState.itemW||0)*viewState.zoom/2,
     y: (dragState.currentY + (dragState.itemH||48))*viewState.zoom + viewState.panY + 12
   } : null;
