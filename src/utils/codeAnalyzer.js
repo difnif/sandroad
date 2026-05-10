@@ -133,10 +133,25 @@ export function applyComparisonResults(project, approvedItems, approvedRoads, ap
 }
 
 // Helpers
-async function callAPI(step, data) {
-  const r = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step, data }) });
-  if (!r.ok) throw new Error(`${step} failed: ${r.status}`);
-  return r.json();
+async function callAPI(step, data, retries = 2) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
+  try {
+    const r = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step, data }), signal: controller.signal });
+    clearTimeout(timeout);
+    if (!r.ok) {
+      if (retries > 0 && r.status >= 500) return callAPI(step, data, retries - 1);
+      throw new Error(`${step} failed: ${r.status}`);
+    }
+    return r.json();
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err.name === 'AbortError') {
+      if (retries > 0) return callAPI(step, data, retries - 1);
+      throw new Error(`${step} timed out — try a smaller ZIP or check your API key`);
+    }
+    throw err;
+  }
 }
 
 function buildSandSummary(project) {
