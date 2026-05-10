@@ -136,9 +136,14 @@ export default function EditorScreen() {
   // City duplicate
   const handleCityDuplicate = async () => {
     if (!project) return;
-    const newProj = duplicateProject(project, `${project.name} (사본)`);
-    const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), { ...newProj, ownerId: user.uid });
-    openTab(docRef.id);
+    try {
+      const newProj = duplicateProject(project, `${project.name} (사본)`);
+      const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), { ...newProj, ownerId: user.uid });
+      openTab(docRef.id);
+    } catch (err) {
+      console.error('City duplicate failed:', err);
+      alert(themeId === 'sand' ? `사본 생성 실패: ${err.message}` : `Duplicate failed: ${err.message}`);
+    }
   };
 
   // District duplicate
