@@ -100,6 +100,47 @@ Respond ONLY in JSON:
         user: `Structure:\n${data.structureSummary}\n\nLocal inspection:\n${data.localResults}`
       };
 
+    case 'infra':
+      return {
+        system: `You are an infrastructure architect for an app/service.
+Given the current project structure, generate a COMPREHENSIVE (120% generous) infrastructure/settings district.
+Be generous — include everything the app might need. Users can delete what they don't need.
+
+Group items into a main district and sub-districts if there are many items.
+Each item needs: name, buildingType (config/noti/auth/analytics/cache/storage/external/queue), children array.
+Valid buildingTypes: page, component, api, db, auth, storage, noti, payment, analytics, cache, queue, external, config, custom.
+
+Use ${data.lang === 'ko' ? 'Korean' : 'English'} for names.
+
+Respond ONLY in JSON:
+{
+  "districts": [
+    {
+      "label": "⚙️ 인프라",
+      "color": "stone",
+      "isSubDistrict": false,
+      "items": [
+        { "name": "알림 설정", "buildingType": "noti", "children": [
+          { "name": "푸시 알림", "buildingType": "noti" },
+          { "name": "이메일 알림", "buildingType": "noti" }
+        ]}
+      ]
+    },
+    {
+      "label": "🔒 보안/권한",
+      "color": "stone",
+      "isSubDistrict": true,
+      "parentDistrict": "⚙️ 인프라",
+      "items": [...]
+    }
+  ],
+  "memo": "이 인프라 구역에 대한 간단한 설명..."
+}
+
+Consider including: notifications (push/email/SMS/in-app), sound/vibration, theme/darkmode, language/i18n, account management, privacy settings, data backup/export, cache management, error logging/monitoring, analytics/tracking consent, accessibility, performance settings, network/offline mode, update management, security settings, permissions, rate limiting, API keys management, webhook configuration, scheduled tasks, storage management, CDN settings, and any other infrastructure the project might need.`,
+        user: data.structureSummary
+      };
+
     default:
       return { system: 'You are a helpful assistant.', user: JSON.stringify(data) };
   }
