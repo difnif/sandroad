@@ -9,7 +9,7 @@ export function duplicateProject(project, newName) {
   const newColumns = project.columns.map(col => {
     const newKey = `col_${genNodeId().slice(0, 6)}`;
     idMap[col.key] = newKey;
-    return { ...col, key: newKey };
+    return { ...col, key: newKey, isSubDistrict: col.isSubDistrict || false };
   });
 
   const newStructure = {};
@@ -25,14 +25,14 @@ export function duplicateProject(project, newName) {
     to: idMap[r.to] || r.to,
   }));
 
-  return {
+  return stripUndefined({
     name: newName || `${project.name} (사본)`,
     columns: newColumns,
     structure: newStructure,
     roads: newRoads,
     assets: project.assets ? JSON.parse(JSON.stringify(project.assets)) : {},
     createdAt: Date.now(),
-  };
+  });
 }
 
 // ========== DISTRICT COPY (duplicate one column) ==========
@@ -224,13 +224,16 @@ function deepCloneTree(nodes, idMap) {
   return nodes.map(node => {
     const newId = genNodeId();
     idMap[node.id] = newId;
-    return {
+    const clone = {
       ...node,
       id: newId,
       children: node.children ? deepCloneTree(node.children, idMap) : [],
-      cityPos: node.cityPos ? { ...node.cityPos } : undefined,
       createdAt: Date.now(),
     };
+    // Firestore cannot store undefined — only include cityPos if it exists
+    if (node.cityPos) clone.cityPos = { ...node.cityPos };
+    else delete clone.cityPos;
+    return clone;
   });
 }
 
@@ -239,4 +242,17 @@ function walkTree(nodes, cb, pid = null, d = 1) {
     cb(n, pid, d);
     if (n.children?.length) walkTree(n.children, cb, n.id, d + 1);
   }
+}
+
+// Firestore rejects undefined values — recursively remove them
+function stripUndefined(obj) {
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  if (obj && typeof obj === 'object') {
+    const clean = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) clean[k] = stripUndefined(v);
+    }
+    return clean;
+  }
+  return obj;
 }
