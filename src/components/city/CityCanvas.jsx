@@ -146,7 +146,7 @@ export default function CityCanvas({
   // Hit test for vehicles
   const hitTestVehicle = useCallback((wx, wy) => {
     for (const anim of vehicleAnims.current) {
-      if (Math.hypot(wx - anim.x, wy - anim.y) < 12) return anim;
+      if (anim.x != null && anim.y != null && Math.hypot(wx - anim.x, wy - anim.y) < 12) return anim;
     }
     return null;
   }, []);
@@ -298,7 +298,7 @@ export default function CityCanvas({
       });
 
       // Vehicle tooltip
-      if (hoveredVehicle) {
+      if (hoveredVehicle && hoveredVehicle.x != null && hoveredVehicle.y != null) {
         const info = VEHICLE_TYPES[hoveredVehicle.vehicle] || VEHICLE_TYPES.car;
         const dt = DATA_TYPES[hoveredVehicle.dataType] || DATA_TYPES.content;
         const fromItem = itemMap[hoveredVehicle.from];
@@ -552,9 +552,9 @@ function drawGrid(ctx, vs, cs, t, snap) {
     for (let y = ssy; y < sey; y += ss) { ctx.beginPath(); ctx.moveTo(ssx, y); ctx.lineTo(sex, y); ctx.stroke(); }
   }
 }
-function drawDistrict(ctx, d, c, r) { ctx.fillStyle = c.fill; ctx.strokeStyle = c.border; ctx.lineWidth = 3; roundedRect(ctx, d.x, d.y, d.width, d.height, 12); ctx.fill(); ctx.stroke(); ctx.fillStyle = c.text; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(`${r}. ${d.label}`, d.x+16, d.y+10); }
-function drawLand(ctx, l, c, sel, hov) { if (hov||sel) { ctx.shadowColor = sel ? 'rgba(245,158,11,0.4)' : 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; } ctx.fillStyle = c.landFill; ctx.strokeStyle = sel ? '#f59e0b' : c.border; ctx.lineWidth = sel ? 2.5 : 1.5; ctx.setLineDash([6,3]); roundedRect(ctx, l.x, l.y, l.w, l.h, 8); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.fillStyle = c.text; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(`[L${l.depth}] ${l.name||''}`, l.x+8, l.y+6); }
-function drawBuilding(ctx, b, c, sel, hov) {
+function drawDistrict(ctx, d, c, r) { if (!d || !c) return; ctx.fillStyle = c.fill; ctx.strokeStyle = c.border; ctx.lineWidth = 3; roundedRect(ctx, d.x, d.y, d.width, d.height, 12); ctx.fill(); ctx.stroke(); ctx.fillStyle = c.text; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(`${r}. ${d.label}`, d.x+16, d.y+10); }
+function drawLand(ctx, l, c, sel, hov) { if (!l || !c) return; if (hov||sel) { ctx.shadowColor = sel ? 'rgba(245,158,11,0.4)' : 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; } ctx.fillStyle = c.landFill; ctx.strokeStyle = sel ? '#f59e0b' : c.border; ctx.lineWidth = sel ? 2.5 : 1.5; ctx.setLineDash([6,3]); roundedRect(ctx, l.x, l.y, l.w, l.h, 8); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.fillStyle = c.text; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(`[L${l.depth}] ${l.name||''}`, l.x+8, l.y+6); }
+function drawBuilding(ctx, b, c, sel, hov) { if (!b || !c) return;
   const bt = getBuildingType(b.buildingType);
   ctx.shadowColor = hov ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.1)';
   ctx.shadowBlur = hov ? 6 : 3; ctx.shadowOffsetY = hov ? 3 : 1;
@@ -581,8 +581,8 @@ function drawBuilding(ctx, b, c, sel, hov) {
   if (tg.linked) { ctx.fillStyle = '#14b8a6'; ctx.beginPath(); ctx.arc(dx, dy, 2.5, 0, Math.PI*2); ctx.fill(); dx += 7; }
   if (tg.review) { ctx.fillStyle = '#f43f5e'; ctx.beginPath(); ctx.arc(dx, dy, 2.5, 0, Math.PI*2); ctx.fill(); }
 }
-function drawHierRoad(ctx, f, t, th) { const fx = f.x+(f.w||0)/2, fy = f.y+(f.h||0)/2, tx = t.x+(t.w||0)/2, ty = t.y+(t.h||0)/2; ctx.strokeStyle = th === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke(); }
-function drawRoadLine(ctx, f, t, road, c, th, sel) {
+function drawHierRoad(ctx, f, t, th) { if (!f || !t) return; const fx = f.x+(f.w||0)/2, fy = f.y+(f.h||0)/2, tx = t.x+(t.w||0)/2, ty = t.y+(t.h||0)/2; ctx.strokeStyle = th === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke(); }
+function drawRoadLine(ctx, f, t, road, c, th, sel) { if (!f || !t || !road) return;
   const fx = f.x+(f.w||0)/2, fy = f.y+(f.h||0)/2, tx = t.x+(t.w||0)/2, ty = t.y+(t.h||0)/2;
   const rt = ROAD_TYPES[road.type]||ROAD_TYPES.main;
   const vi = VEHICLE_TYPES[road.vehicle]||VEHICLE_TYPES.car;
