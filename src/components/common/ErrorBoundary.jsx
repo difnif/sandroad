@@ -3,7 +3,7 @@ import React from 'react';
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, retryCount: 0 };
   }
 
   static getDerivedStateFromError(error) {
@@ -13,10 +13,18 @@ export default class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     this.setState({ errorInfo });
     console.error('ErrorBoundary caught:', error, errorInfo);
+    
+    // Auto-retry up to 3 times with increasing delay
+    const { retryCount } = this.state;
+    if (retryCount < 3) {
+      setTimeout(() => {
+        this.setState(prev => ({ hasError: false, error: null, errorInfo: null, retryCount: prev.retryCount + 1 }));
+      }, 500 * (retryCount + 1));
+    }
   }
 
   render() {
-    if (this.state.hasError) {
+    if (this.state.hasError && this.state.retryCount >= 3) {
       return (
         <div style={{ padding: 20, fontFamily: 'monospace', fontSize: 12, background: '#1e1e1e', color: '#ff6b6b', minHeight: '100vh', overflow: 'auto' }}>
           <h2 style={{ color: '#ffd93d' }}>⚠️ sandroad error</h2>
@@ -26,10 +34,18 @@ export default class ErrorBoundary extends React.Component {
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#aaa', fontSize: 10 }}>
             {this.state.errorInfo?.componentStack}
           </pre>
-          <button onClick={() => { this.setState({ hasError: false }); window.location.href = '/'; }}
+          <button onClick={() => { this.setState({ hasError: false, retryCount: 0 }); window.location.href = '/'; }}
             style={{ marginTop: 16, padding: '8px 16px', background: '#ffd93d', color: '#000', border: 'none', borderRadius: 6, fontWeight: 'bold' }}>
             에디터로 돌아가기
           </button>
+        </div>
+      );
+    }
+    if (this.state.hasError) {
+      // Show brief loading state during auto-retry
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'monospace', fontSize: 12, color: '#999' }}>
+          recovering... ({this.state.retryCount}/3)
         </div>
       );
     }
