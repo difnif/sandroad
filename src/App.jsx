@@ -7,6 +7,7 @@ import SignupScreen from './screens/SignupScreen.jsx';
 import EditorScreen from './screens/EditorScreen.jsx';
 import CityViewScreen from './screens/CityViewScreen.jsx';
 import LoadingSpinner from './components/common/LoadingSpinner.jsx';
+import ErrorBoundary from './components/common/ErrorBoundary.jsx';
 
 export default function App() {
   const { loading } = useAuth();
@@ -31,7 +32,9 @@ export default function App() {
         path="/graph"
         element={
           <ProtectedRoute>
-            <CityViewScreen />
+            <ErrorBoundary>
+              <CityViewScreen />
+            </ErrorBoundary>
           </ProtectedRoute>
         }
       />
