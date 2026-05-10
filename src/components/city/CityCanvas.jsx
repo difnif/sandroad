@@ -42,18 +42,16 @@ export default function CityCanvas({
   const longPressTimer = useRef(null);
   const longPressTarget = useRef(null);
 
-  const layout = useMemo(() => computeCityLayout(project), [project]);
+  const layout = useMemo(() => { try { return computeCityLayout(project); } catch(e) { throw new Error("SECTION-B layout: " + e.message); } }, [project]);
   const allRoads = roads || [];
   const monoCls = theme.fontMono ? 'font-mono-ui' : '';
   const lang = themeId === 'sand' ? 'ko' : 'en';
 
   // Build item lookup
-  const itemMap = useMemo(() => {
-    const m = {};
+  const itemMap = useMemo(() => { try { const m = {};
     for (const i of layout.allItems) m[i.id] = i;
     for (const i of layout.unplacedItems) m[i.id] = i;
-    return m;
-  }, [layout]);
+    return m; } catch(e) { throw new Error("SECTION-C itemMap: " + e.message); } }, [layout]);
 
   const projectIdRef = useRef(null);
   useEffect(() => {
@@ -447,10 +445,10 @@ export default function CityCanvas({
   const handleConfirm = () => { if (dragState?.phase !== 'dropped') return; if (dragState.isUnplaced) onPlaceItem?.(dragState.itemId, { x: dragState.currentX, y: dragState.currentY }); else onPositionConfirm?.(dragState.itemId, { x: dragState.currentX, y: dragState.currentY }); setDragState(null); };
   const handleCancel = () => setDragState(null);
 
-  const confirmPos = (dragState?.phase === 'dropped' && dragState.currentX != null && dragState.currentY != null) ? {
+  let confirmPos = null; try { /* SECTION-A */ confirmPos = (dragState?.phase === 'dropped' && dragState.currentX != null && dragState.currentY != null) ? {
     x: dragState.currentX*viewState.zoom + viewState.panX + (dragState.itemW||0)*viewState.zoom/2,
     y: (dragState.currentY + (dragState.itemH||48))*viewState.zoom + viewState.panY + 12
-  } : null;
+  } : null; } catch(e) { throw new Error("SECTION-A confirmPos: " + e.message + " dragState=" + JSON.stringify(dragState)); }
 
   return (
     <div ref={containerRef} className="w-full h-full relative" style={{ touchAction: 'none' }}>
