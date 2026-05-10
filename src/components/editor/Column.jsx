@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Clipboard, Edit2, X, Check, FileDown } from 'lucide-react';
+import { Clipboard, Edit2, X, Check, FileDown, Copy, Layers } from 'lucide-react';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import TreeNode from './TreeNode.jsx';
@@ -16,7 +16,7 @@ export default function Column({
   onToggleExpand, onUpdateNode, onToggleTag, onAddChild,
   onCopy, onPasteAsChild, onRequestDelete, onToggleSelect,
   onOutdent, onIndent, onMoveUp, onMoveDown,
-  onExportColumn
+  onExportColumn, onDuplicateColumn, onToggleSubDistrict
 }) {
   const { theme, t, themeId } = useTheme();
   const [editingLabel, setEditingLabel] = useState(false);
@@ -137,6 +137,24 @@ export default function Column({
               >
                 <FileDown size={12} />
               </button>
+              {onDuplicateColumn && (
+                <button
+                  onClick={() => onDuplicateColumn(column.key)}
+                  className={`p-1 rounded opacity-50 hover:opacity-100 transition-colors ${styles.addBtn}`}
+                  title={themeId === 'sand' ? '구역 사본 만들기' : 'Duplicate district'}
+                >
+                  <Copy size={12} />
+                </button>
+              )}
+              {onToggleSubDistrict && (
+                <button
+                  onClick={() => onToggleSubDistrict(column.key)}
+                  className={`p-1 rounded opacity-50 hover:opacity-100 transition-colors ${column.isSubDistrict ? 'text-purple-500 opacity-100' : ''} ${styles.addBtn}`}
+                  title={themeId === 'sand' ? '하위 구역 설정' : 'Toggle sub-district'}
+                >
+                  <Layers size={12} />
+                </button>
+              )}
               <button
                 onClick={() => onRequestDeleteColumn(column.key, column.label)}
                 className={`p-1 rounded opacity-50 hover:opacity-100 hover:bg-red-500/20 hover:text-red-500 transition-colors`}
