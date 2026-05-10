@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderOpen, Palette, Box } from 'lucide-react';
+import { FolderOpen, Palette, Box, Copy, Settings, Layers } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase/config.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -28,6 +28,8 @@ import ProjectsListModal from '../components/editor/ProjectsListModal.jsx';
 import DashboardBar from '../components/dashboard/DashboardBar.jsx';
 import DashboardSettings from '../components/dashboard/DashboardSettings.jsx';
 import AppearanceSettings from '../components/common/AppearanceSettings.jsx';
+import InfraWizard from '../components/city/InfraWizard.jsx';
+import { duplicateProject, duplicateDistrict, toggleSubDistrict } from '../utils/projectOps.js';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 import FileToolbar from '../components/editor/FileToolbar.jsx';
 
@@ -130,6 +132,58 @@ export default function EditorScreen() {
     const newColor = getNextColumnColor(themeId, project.columns.map(c => c.color));
     updateLocal(p => ({ ...p, columns: [...p.columns, { key: newKey, label: t.columnDefaultName(p.columns.length + 1), color: newColor }], structure: { ...p.structure, [newKey]: [] } }));
   };
+
+  // City duplicate
+  const handleCityDuplicate = async () => {
+    if (!project) return;
+    const newProj = duplicateProject(project, `${project.name} (사본)`);
+    const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), { ...newProj, ownerId: user.uid });
+    openTab(docRef.id);
+  };
+
+  // District duplicate
+  const handleDistrictDuplicate = (colKey) => {
+    if (!project) return;
+    const result = duplicateDistrict(project, colKey);
+    if (!result) return;
+    updateLocal(p => ({
+      ...p,
+      columns: [...p.columns, result.column],
+      structure: { ...p.structure, [result.column.key]: result.structure },
+      roads: [...(p.roads || []), ...result.roads],
+    }));
+  };
+
+  // Sub-district toggle
+  const handleToggleSubDistrict = (colKey) => {
+    if (!project) return;
+    updateLocal(p => ({ ...p, columns: toggleSubDistrict(p.columns, colKey) }));
+  };
+
+  // Infra wizard
+  const [showInfraWizard, setShowInfraWizard] = useState(false);
+  const handleApplyInfra = (infraResult) => {
+    if (!project) return;
+    updateLocal(p => {
+      let newCols = [...p.columns];
+      let newStruct = { ...p.structure };
+      for (const dist of infraResult.districts) {
+        newCols.push(dist.column);
+        newStruct[dist.column.key] = dist.structure;
+      }
+      // Add memo as standalone building in first infra district
+      if (infraResult.memo && infraResult.districts.length > 0) {
+        const firstKey = infraResult.districts[0].column.key;
+        newStruct[firstKey] = [...newStruct[firstKey], infraResult.memo];
+      }
+      return { ...p, columns: newCols, structure: newStruct };
+    });
+  };
+
+  // Filter sub-districts from editor view
+  const visibleColumns = project ? project.columns.filter(c => !c.isSubDistrict) : [];
+  const subDistrictCount = project ? project.columns.filter(c => c.isSubDistrict).length : 0;
+
   const handleRequestDeleteColumn = (colKey, name) => {
     if (!project || project.columns.length <= MIN_COLUMNS) return;
     setPendingDelete({ type: 'column', colKey, name });
@@ -176,6 +230,12 @@ export default function EditorScreen() {
 
           <FileToolbar project={project} onImport={handleImport} />
 
+          <button onClick={handleCityDuplicate} disabled={!project}
+            className={`flex items-center gap-1 px-2 py-1.5 text-xs font-medium border rounded-md disabled:opacity-40 ${monoCls} ${theme.button}`}
+            title={themeId === 'sand' ? '도시 사본 만들기' : 'Duplicate city'}>
+            <Copy size={13} /> <span className="hidden sm:inline">{themeId === 'sand' ? '사본' : 'copy'}</span>
+          </button>
+
           <button onClick={() => navigate('/graph')} disabled={!project}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border rounded-md disabled:opacity-40 ${monoCls} ${theme.button}`} title="City view">
             <Box size={14} /> graph
@@ -202,8 +262,9 @@ export default function EditorScreen() {
             {projLoading ? t.loadingProject : t.selectOrCreate}
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {project.columns.map((col, colIdx) => (
+            {visibleColumns.map((col, colIdx) => (
               <Column key={col.key} column={col} columnIndex={colIdx} items={project.structure[col.key] || []} expandedIds={expanded}
                 selectedIds={new Set()} onToggleSelect={() => {}}
                 onUpdateColumn={handleUpdateColumn} onRequestDeleteColumn={handleRequestDeleteColumn}
@@ -211,11 +272,30 @@ export default function EditorScreen() {
                 onToggleExpand={handleToggleExpand} onUpdateNode={handleUpdateNode} onToggleTag={handleToggleTag}
                 onAddChild={handleAddChild} onCopy={handleCopy} onPasteAsChild={handlePasteAsChild}
                 onRequestDelete={handleRequestDelete}
+                onDuplicateColumn={handleDistrictDuplicate}
+                onToggleSubDistrict={handleToggleSubDistrict}
                 onOutdent={() => {}} onIndent={() => {}} onMoveUp={() => {}} onMoveDown={() => {}}
                 onExportColumn={() => handleExport()} />
             ))}
-            {project.columns.length < MAX_COLUMNS && <AddColumnCard onAdd={handleAddColumn} />}
+            {project.columns.length < MAX_COLUMNS && (
+              <div className="space-y-2">
+                <AddColumnCard onAdd={handleAddColumn} />
+                <button onClick={() => setShowInfraWizard(true)}
+                  className={`w-full px-3 py-2.5 text-xs font-bold rounded-lg border-2 border-dashed ${theme.border} ${theme.textMuted} ${monoCls} flex items-center justify-center gap-1.5`}>
+                  <Settings size={14} /> {themeId === 'sand' ? '⚙️ 인프라 구역' : '⚙️ Infra District'}
+                </button>
+              </div>
+            )}
           </div>
+          {subDistrictCount > 0 && (
+            <div className={`mt-2 px-3 py-1.5 text-[10px] ${theme.textMuted} ${monoCls} ${theme.bgAlt} rounded-lg`}>
+              <Layers size={10} className="inline mr-1" />
+              {themeId === 'sand'
+                ? `하위 구역 ${subDistrictCount}개는 시티뷰에서만 표시됩니다`
+                : `${subDistrictCount} sub-district(s) visible only in city view`}
+            </div>
+          )}
+          </>
         )}
       </div>
 
@@ -226,6 +306,13 @@ export default function EditorScreen() {
         onNew={() => { setShowProjectsList(false); setShowNewProject(true); }} />
       <DashboardSettings open={showDashSettings} settings={dashSettings} setSettings={setDashSettings} onClose={() => setShowDashSettings(false)} />
       <AppearanceSettings open={showAppearance} onClose={() => setShowAppearance(false)} />
+      {showInfraWizard && project && (
+        <InfraWizard
+          project={project}
+          onApply={handleApplyInfra}
+          onClose={() => setShowInfraWizard(false)}
+        />
+      )}
     </div>
   );
 }
